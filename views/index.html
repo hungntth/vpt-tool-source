@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPT TOOLS</title>
+    <link rel="icon" type="image/x-icon" href="../favicon.ico">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="font-sans bg-gradient-to-br from-indigo-500 to-purple-600 p-2 min-h-screen text-gray-800 overflow-hidden">
+    <div class="w-full h-[400px] mx-auto bg-white rounded-lg shadow-xl overflow-hidden flex flex-col">
+        <div class="p-2.5 overflow-y-auto flex-1 flex flex-col gap-2">
+            <div class="flex items-center gap-1">
+                <button type="button" id="navLinksTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-indigo-400 bg-indigo-500 text-white transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🔗 Quản lý link</button>
+                <button type="button" id="navAutoTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🖱️ Auto click</button>
+            </div>
+
+            <div id="linksPanel" class="overflow-x-auto overflow-y-auto rounded-md border border-gray-200 flex-1 min-h-0">
+                <table class="w-full border-collapse bg-white text-xs">
+                    <thead class="bg-gradient-to-r from-indigo-500 to-purple-600 text-white sticky top-0 z-10">
+                        <tr>
+                            <th class="w-9 p-1.5 text-center font-semibold text-[9px] whitespace-nowrap text-indigo-500">STT</th>
+                            <th class="w-20 max-w-20 p-1.5 text-left font-semibold text-[9px] whitespace-nowrap">Tên</th>
+                            <th class="max-w-[80px] p-1.5 text-left font-semibold text-[9px] whitespace-nowrap">Định vị</th>
+                            <th class="max-w-[80px] p-1.5 text-left font-semibold text-[9px] whitespace-nowrap">Link</th>
+                            <th class="w-16 text-center p-1.5 font-semibold text-[9px] whitespace-nowrap">Flash</th>
+                            <th class="w-24 text-center p-1.5 font-semibold text-[9px] whitespace-nowrap">Auto profile</th>
+                            <th class="w-8 p-1.5"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <tr>
+                            <td colspan="6" class="text-center py-8 px-2.5 text-gray-500">
+                                <div class="text-2xl mb-2.5">📋</div>
+                                <p class="text-xs">Chưa có dữ liệu. Hãy thêm link mới!</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="linksFormWrapper" class="bg-gray-50 p-1.5 rounded border border-gray-200 flex-shrink-0">
+                <h2 id="formTitle" class="text-indigo-500 mb-1 text-xs font-semibold">➕ Thêm Link Mới</h2>
+                <form id="itemForm">
+                    <div class="flex flex-col gap-1">
+                        <div class="mb-1 flex items-center gap-2">
+                            <label for="ten" class="w-24 flex-shrink-0 text-center font-semibold text-gray-700 text-[10px]">Tên *</label>
+                            <input type="text" id="ten" name="ten" required placeholder="Nhập tên định danh" 
+                                class="flex-1 min-w-0 px-1 py-1 border border-gray-300 rounded text-center text-[10px] transition-colors duration-300 focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div class="mb-1 flex items-center gap-2">
+                            <label for="pid" class="w-24 flex-shrink-0 text-center font-semibold text-gray-700 text-[10px]">PID</label>
+                            <input type="text" id="pid" name="pid" placeholder="Nhập PID (tùy chọn)" 
+                                class="flex-1 min-w-0 px-1 py-1 border border-gray-300 rounded text-center text-[10px] transition-colors duration-300 focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div class="mb-1 flex items-center gap-2">
+                            <label for="link" class="w-24 flex-shrink-0 text-center font-semibold text-gray-700 text-[10px]">Link *</label>
+                            <input type="text" id="link" name="link" required placeholder="Nhập URL" 
+                                class="flex-1 min-w-0 px-1 py-1 border border-gray-300 rounded text-center text-[10px] transition-colors duration-300 focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+                    <div class="mb-1">
+                        <button type="submit" class="btn btn-primary" id="submitBtn">Thêm</button>
+                        <button type="button" class="btn btn-secondary hidden" id="cancelBtn">Hủy</button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="autoPanel" class="bg-gray-50 p-2 rounded border border-indigo-100 hidden flex-shrink-0">
+                <div class="flex flex-col gap-2 w-full text-[11px]">
+                    <div class="text-gray-600 leading-tight">
+                        <p class="font-semibold mb-0.5 text-indigo-600">⚙️ Thiết lập Auto Click</p>
+                        <p>Kéo các nút chọn ra ứng dụng cần thao tác rồi thả chuột để ghi nhận.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="autoPickWindowBtn" draggable="true" class="flex-1 px-2 py-1 rounded bg-indigo-500 text-white font-semibold hover:bg-indigo-600 transition-colors duration-200 text-xs">🖥️ Kéo sang ứng dụng</button>
+                        <div id="autoTargetInfo" class="flex-1 px-2 py-1 rounded border border-dashed border-indigo-300 text-center text-gray-600 bg-white min-h-[32px] flex items-center justify-center">
+                            Chưa chọn ứng dụng
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="autoPickPointBtn" draggable="true" class="flex-1 px-2 py-1 rounded bg-purple-500 text-white font-semibold hover:bg-purple-600 transition-colors duration-200 text-xs disabled:opacity-60 disabled:pointer-events-none" disabled>📍 Kéo chọn điểm</button>
+                        <button type="button" id="autoClearPointsBtn" class="px-2 py-1 text-xs font-semibold rounded border border-gray-300 text-gray-600 hover:bg-gray-100">🧹 Xóa điểm</button>
+                    </div>
+                    <div class="border border-gray-200 rounded p-2 bg-white max-h-28 overflow-y-auto">
+                        <p class="text-[10px] font-semibold text-gray-500 uppercase mb-1 tracking-wide">Danh sách điểm auto</p>
+                        <ul id="autoPointsList" class="space-y-1 text-gray-700 text-[11px]">
+                            <li class="text-gray-400">Chưa có điểm nào</li>
+                        </ul>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <label for="autoInterval" class="text-gray-600 font-semibold whitespace-nowrap">Khoảng lặp (ms)</label>
+                        <input type="number" id="autoInterval" min="200" value="1200" class="flex-1 px-2 py-1 border border-gray-300 rounded text-right text-xs focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div class="border border-indigo-200 rounded p-2 bg-white">
+                        <p class="text-[10px] font-semibold text-gray-600 uppercase mb-1 tracking-wide">Lưu quy trình</p>
+                        <div class="flex items-center gap-2 mb-2">
+                            <input type="text" id="autoProfileName" placeholder="VD: Auto hồi máu" class="flex-1 px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500">
+                            <button type="button" id="autoSaveProfileBtn" class="px-2 py-1 text-xs font-semibold rounded bg-indigo-500 text-white hover:bg-indigo-600 whitespace-nowrap">💾 Lưu</button>
+                        </div>
+                        <div class="max-h-24 overflow-y-auto border border-dashed border-gray-200 rounded p-2 bg-gray-50">
+                            <ul id="autoProfilesList" class="space-y-1 text-[11px] text-gray-700">
+                                <li class="text-gray-400 text-xs">Chưa có quy trình nào</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="autoStartBtn" class="flex-1 btn btn-primary">▶️ Chạy auto</button>
+                        <button type="button" id="autoStopBtn" class="flex-1 btn btn-danger hidden">⏹ Dừng auto</button>
+                    </div>
+                    <p class="text-[10px] text-gray-500">*Giữ chuột tại nút, kéo sang app/điểm cần lấy rồi thả chuột để ghi nhận.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="hidden fixed top-4 right-4 z-50 w-64 px-4 py-3 rounded-xl border-l-4 shadow-2xl text-sm text-white pointer-events-none opacity-0 translate-y-2 transition-all duration-300"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
