@@ -21,6 +21,24 @@ class App {
     this.autoProfileName = '';
     this.dragGhostImage = null;
     this.itemAutoRunning = {}; // Lưu trạng thái running cho từng item: { itemId: true/false }
+    this.recordState = {
+      targetWindow: null,
+      points: [],
+      isRecording: false,
+      draggingWindow: false,
+      currentItemId: null,
+      lastClickTime: null
+    };
+    this.recordElements = {};
+    this.snapState = {
+      targetWindow: null,
+      points: [],
+      isRunning: false,
+      draggingWindow: false,
+      currentImage: null,
+      currentImagePath: null
+    };
+    this.snapElements = {};
     this.init();
   }
 
@@ -45,6 +63,8 @@ class App {
     this.linksFormWrapper = document.getElementById('linksFormWrapper');
     this.navLinksTab = document.getElementById('navLinksTab');
     this.navAutoTab = document.getElementById('navAutoTab');
+    this.navRecordTab = document.getElementById('navRecordTab');
+    this.navSnapTab = document.getElementById('navSnapTab');
     this.autoElements = {
       panel: document.getElementById('autoPanel'),
       pickWindowBtn: document.getElementById('autoPickWindowBtn'),
@@ -58,6 +78,30 @@ class App {
       profileNameInput: document.getElementById('autoProfileName'),
       saveProfileBtn: document.getElementById('autoSaveProfileBtn'),
       profilesList: document.getElementById('autoProfilesList')
+    };
+    this.recordElements = {
+      panel: document.getElementById('recordPanel'),
+      pickWindowBtn: document.getElementById('recordPickWindowBtn'),
+      targetInfo: document.getElementById('recordTargetInfo'),
+      pointsList: document.getElementById('recordPointsList'),
+      startBtn: document.getElementById('recordStartBtn'),
+      stopBtn: document.getElementById('recordStopBtn'),
+      clearBtn: document.getElementById('recordClearBtn'),
+      saveBtn: document.getElementById('recordSaveBtn'),
+      profileNameInput: document.getElementById('recordProfileName')
+    };
+    this.snapElements = {
+      panel: document.getElementById('snapPanel'),
+      pickWindowBtn: document.getElementById('snapPickWindowBtn'),
+      captureBtn: document.getElementById('snapCaptureBtn'),
+      clearBtn: document.getElementById('snapClearBtn'),
+      targetInfo: document.getElementById('snapTargetInfo'),
+      imageContainer: document.getElementById('snapImageContainer'),
+      image: document.getElementById('snapImage'),
+      pointsList: document.getElementById('snapPointsList'),
+      intervalInput: document.getElementById('snapInterval'),
+      startBtn: document.getElementById('snapStartBtn'),
+      stopBtn: document.getElementById('snapStopBtn')
     };
     this.dragGhostImage = this.createDragGhost();
   }
@@ -133,8 +177,12 @@ class App {
 
     this.navLinksTab.addEventListener('click', () => this.switchTab('links'));
     this.navAutoTab.addEventListener('click', () => this.switchTab('auto'));
+    this.navRecordTab.addEventListener('click', () => this.switchTab('record'));
+    this.navSnapTab.addEventListener('click', () => this.switchTab('snap'));
 
     this.setupAutoClickControls();
+    this.setupRecordClickControls();
+    this.setupSnapClickControls();
 
     // Lắng nghe thay đổi tên để cập nhật tab
     document.getElementById('ten').addEventListener('input', () => {
@@ -168,24 +216,45 @@ class App {
     this.persistAutoConfig();
   }
 
-  switchTab(tab) {
+  async switchTab(tab) {
     if (this.activeTab === tab) return;
+    
+    // Dừng record nếu đang record và chuyển sang tab khác
+    if (this.activeTab === 'record' && this.recordState.isRecording && tab !== 'record') {
+      await this.stopRecordClick();
+    }
+    
     this.activeTab = tab;
     const showLinks = tab === 'links';
+    const showAuto = tab === 'auto';
+    const showRecord = tab === 'record';
+    const showSnap = tab === 'snap';
+    
     this.linksPanel.classList.toggle('hidden', !showLinks);
     this.linksFormWrapper.classList.toggle('hidden', !showLinks);
-    this.autoElements.panel.classList.toggle('hidden', showLinks);
+    this.autoElements.panel.classList.toggle('hidden', !showAuto);
+    this.recordElements.panel.classList.toggle('hidden', !showRecord);
+    this.snapElements.panel.classList.toggle('hidden', !showSnap);
 
+    // Reset tất cả tabs
+    [this.navLinksTab, this.navAutoTab, this.navRecordTab, this.navSnapTab].forEach(navTab => {
+      navTab.classList.remove('border-indigo-400', 'bg-indigo-500', 'text-white');
+      navTab.classList.add('bg-indigo-50', 'text-indigo-600');
+    });
+
+    // Active tab được chọn
     if (showLinks) {
       this.navLinksTab.classList.add('border-indigo-400', 'bg-indigo-500', 'text-white');
       this.navLinksTab.classList.remove('bg-indigo-50', 'text-indigo-600');
-      this.navAutoTab.classList.remove('border-indigo-400', 'bg-indigo-500', 'text-white');
-      this.navAutoTab.classList.add('bg-indigo-50', 'text-indigo-600');
-    } else {
+    } else if (showAuto) {
       this.navAutoTab.classList.add('border-indigo-400', 'bg-indigo-500', 'text-white');
       this.navAutoTab.classList.remove('bg-indigo-50', 'text-indigo-600');
-      this.navLinksTab.classList.remove('border-indigo-400', 'bg-indigo-500', 'text-white');
-      this.navLinksTab.classList.add('bg-indigo-50', 'text-indigo-600');
+    } else if (showRecord) {
+      this.navRecordTab.classList.add('border-indigo-400', 'bg-indigo-500', 'text-white');
+      this.navRecordTab.classList.remove('bg-indigo-50', 'text-indigo-600');
+    } else if (showSnap) {
+      this.navSnapTab.classList.add('border-indigo-400', 'bg-indigo-500', 'text-white');
+      this.navSnapTab.classList.remove('bg-indigo-50', 'text-indigo-600');
     }
   }
 
@@ -391,6 +460,9 @@ class App {
             <div class="absolute top-full right-0 bg-white border border-gray-300 rounded shadow-lg z-[100] min-w-20 mt-1 hidden" id="menu-${item.id}">
               <button class="menu-item rounded-t" onclick="app.editItem(${item.id}); app.closeAllMenus();">
                 ✏️ Sửa
+              </button>
+              <button class="menu-item" onclick="app.openRecordClick(${item.id}); app.closeAllMenus();">
+                🎬 Record click
               </button>
               <button class="menu-item menu-item-danger rounded-b" onclick="app.deleteItem(${item.id}); app.closeAllMenus();">
                 🗑️ Xóa
@@ -1109,6 +1181,555 @@ class App {
 
   delay(ms = 300) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  setupRecordClickControls() {
+    const {
+      panel,
+      pickWindowBtn,
+      startBtn,
+      stopBtn,
+      clearBtn,
+      saveBtn
+    } = this.recordElements;
+
+    if (!panel) return;
+
+    // Chọn ứng dụng bằng drag
+    if (pickWindowBtn) {
+      pickWindowBtn.addEventListener('dragstart', (event) => {
+        this.recordState.draggingWindow = true;
+        pickWindowBtn.classList.add('opacity-80');
+        if (event?.dataTransfer && this.dragGhostImage) {
+          event.dataTransfer.setDragImage(this.dragGhostImage, 0, 0);
+        }
+      });
+
+      pickWindowBtn.addEventListener('dragend', async (event) => {
+        pickWindowBtn.classList.remove('opacity-80');
+        this.recordState.draggingWindow = false;
+        await this.handleRecordWindowDrop(event);
+      });
+    }
+
+    // Bắt đầu record
+    if (startBtn) {
+      startBtn.addEventListener('click', () => this.startRecordClick());
+    }
+
+    // Dừng record
+    if (stopBtn) {
+      stopBtn.addEventListener('click', () => this.stopRecordClick());
+    }
+
+    // Xóa điểm
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => this.clearRecordPoints());
+    }
+
+    // Lưu profile
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => this.saveRecordProfile());
+    }
+
+    // Lắng nghe click events từ main process
+    ipcRenderer.on('record-click-point', (_event, payload) => {
+      if (this.recordState.isRecording && payload?.point) {
+        const point = payload.point;
+        const pointId = this.generatePointId();
+        const currentTime = Date.now();
+        
+        // Tính thời gian chờ từ click trước (nếu có)
+        let delay = 0;
+        if (this.recordState.lastClickTime !== null) {
+          delay = currentTime - this.recordState.lastClickTime;
+        }
+        
+        this.recordState.points.push({
+          id: pointId,
+          offsetX: Math.round(point.offsetX),
+          offsetY: Math.round(point.offsetY),
+          screenX: Math.round(point.screenX),
+          screenY: Math.round(point.screenY),
+          delay: delay // Thời gian chờ từ click trước (ms)
+        });
+        
+        this.recordState.lastClickTime = currentTime;
+        this.renderRecordPoints();
+      }
+    });
+
+    // Lắng nghe lỗi từ record process
+    ipcRenderer.on('record-click-error', (_event, payload) => {
+      if (payload?.message) {
+        this.showMessage('Lỗi record: ' + payload.message, 'error');
+        this.stopRecordClick();
+      }
+    });
+  }
+
+  openRecordClick(itemId) {
+    // Chuyển sang tab record
+    this.switchTab('record');
+    // Reset state nếu cần
+    if (!this.recordState.isRecording) {
+      this.recordState.targetWindow = null;
+      this.recordState.points = [];
+      this.recordState.lastClickTime = null;
+      this.updateRecordTargetInfo();
+      this.renderRecordPoints();
+      this.toggleRecordButtons();
+    }
+  }
+
+  async handleRecordWindowDrop(event) {
+    if (!event || (event.screenX === 0 && event.screenY === 0)) {
+      this.showMessage('Không ghi nhận được vị trí thả chuột.', 'error');
+      return;
+    }
+
+    try {
+      const result = await ipcRenderer.invoke('auto-detect-window', {
+        x: event.screenX,
+        y: event.screenY
+      });
+
+      if (result?.success) {
+        this.recordState.targetWindow = result.window;
+        this.updateRecordTargetInfo();
+        this.showMessage('Đã ghi nhận ứng dụng: ' + result.window.title, 'success');
+      } else {
+        this.showMessage(result?.error || 'Không xác định được ứng dụng.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  updateRecordTargetInfo() {
+    const infoEl = this.recordElements.targetInfo;
+    if (!infoEl) return;
+
+    infoEl.classList.remove('text-green-600', 'font-semibold');
+    infoEl.classList.add('text-gray-600');
+
+    if (this.recordState.targetWindow) {
+      infoEl.textContent = `${this.recordState.targetWindow.title} (PID ${this.recordState.targetWindow.pid})`;
+      infoEl.classList.remove('text-gray-600');
+      infoEl.classList.add('text-green-600', 'font-semibold');
+    } else {
+      infoEl.textContent = 'Chưa chọn ứng dụng';
+    }
+  }
+
+  renderRecordPoints() {
+    const list = this.recordElements.pointsList;
+    if (!list) return;
+
+    if (this.recordState.points.length === 0) {
+      list.innerHTML = '<li class="text-gray-400">Chưa có điểm nào</li>';
+      return;
+    }
+
+    list.innerHTML = this.recordState.points.map((point, index) => {
+      const delayText = index === 0 ? '' : ` • Chờ: ${point.delay}ms`;
+      return `
+      <li class="flex items-center justify-between bg-indigo-50 text-indigo-700 px-2 py-1 rounded">
+        <span>#${index + 1} • X: ${point.offsetX} | Y: ${point.offsetY}${delayText}</span>
+        <button class="text-red-500 text-xs font-bold" onclick="app.removeRecordPoint(${point.id})">✖</button>
+      </li>
+    `;
+    }).join('');
+  }
+
+  removeRecordPoint(id) {
+    this.recordState.points = this.recordState.points.filter(point => point.id !== id);
+    this.renderRecordPoints();
+  }
+
+  clearRecordPoints() {
+    this.recordState.points = [];
+    this.recordState.lastClickTime = null;
+    this.renderRecordPoints();
+    this.showMessage('Đã xóa tất cả điểm', 'success');
+  }
+
+  async startRecordClick() {
+    if (!this.recordState.targetWindow) {
+      this.showMessage('Vui lòng chọn ứng dụng trước.', 'error');
+      return;
+    }
+
+    try {
+      console.log('Starting record click with window:', this.recordState.targetWindow);
+      // Reset thời gian click trước khi bắt đầu record mới
+      this.recordState.lastClickTime = null;
+      
+      const result = await ipcRenderer.invoke('record-click-start', {
+        targetWindow: {
+          pid: this.recordState.targetWindow.pid,
+          title: this.recordState.targetWindow.title,
+          handle: this.recordState.targetWindow.handle
+        }
+      });
+
+      console.log('Record click start result:', result);
+      if (result?.success) {
+        this.recordState.isRecording = true;
+        this.toggleRecordButtons();
+        this.showMessage('Đang ghi lại click... Nhấp chuột vào ứng dụng đã chọn.', 'success');
+      } else {
+        this.showMessage(result?.error || 'Không thể bắt đầu record.', 'error');
+      }
+    } catch (error) {
+      console.error('Error starting record click:', error);
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  async stopRecordClick() {
+    if (!this.recordState.isRecording) {
+      return;
+    }
+
+    try {
+      await ipcRenderer.invoke('record-click-stop');
+      this.recordState.isRecording = false;
+      this.toggleRecordButtons();
+      this.showMessage('Đã dừng ghi lại click.', 'success');
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  toggleRecordButtons() {
+    const { startBtn, stopBtn } = this.recordElements;
+    if (!startBtn || !stopBtn) return;
+
+    if (this.recordState.isRecording) {
+      startBtn.classList.add('hidden');
+      stopBtn.classList.remove('hidden');
+    } else {
+      startBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+    }
+  }
+
+  async saveRecordProfile() {
+    const nameInput = this.recordElements.profileNameInput;
+    if (!nameInput) return;
+
+    const name = nameInput.value.trim();
+    if (!name) {
+      this.showMessage('Vui lòng nhập tên profile.', 'error');
+      return;
+    }
+
+    if (this.recordState.points.length === 0) {
+      this.showMessage('Chưa có điểm nào để lưu.', 'error');
+      return;
+    }
+
+    try {
+      // Tính interval trung bình từ các delay (nếu có)
+      let avgInterval = 1200; // Mặc định
+      const delays = this.recordState.points
+        .filter(p => p.delay > 0)
+        .map(p => p.delay);
+      if (delays.length > 0) {
+        avgInterval = Math.round(delays.reduce((a, b) => a + b, 0) / delays.length);
+        avgInterval = Math.max(200, avgInterval); // Tối thiểu 200ms
+      }
+      
+      const result = await ipcRenderer.invoke('auto-save-profile', {
+        name,
+        interval: avgInterval,
+        points: this.recordState.points.map(({ offsetX, offsetY }) => ({ offsetX, offsetY }))
+      });
+
+      if (result?.success) {
+        this.autoProfiles = Array.isArray(result.profiles) ? result.profiles : [];
+        this.syncAutoSelections();
+        this.renderAutoProfiles();
+        this.renderTable();
+        this.showMessage(`Đã lưu profile "${name}".`, 'success');
+        nameInput.value = '';
+        this.recordState.points = [];
+        this.renderRecordPoints();
+      } else {
+        this.showMessage(result?.error || 'Không lưu được profile.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  setupSnapClickControls() {
+    const {
+      pickWindowBtn,
+      captureBtn,
+      clearBtn,
+      image,
+      pointsList,
+      intervalInput,
+      startBtn,
+      stopBtn
+    } = this.snapElements;
+
+    if (!pickWindowBtn) return;
+
+    // Load snap config khi khởi động
+    this.loadSnapConfig();
+
+    // Chọn ứng dụng bằng drag
+    pickWindowBtn.addEventListener('dragstart', (event) => {
+      this.snapState.draggingWindow = true;
+      pickWindowBtn.classList.add('opacity-80');
+      if (event?.dataTransfer && this.dragGhostImage) {
+        event.dataTransfer.setDragImage(this.dragGhostImage, 0, 0);
+      }
+    });
+
+    pickWindowBtn.addEventListener('dragend', async (event) => {
+      pickWindowBtn.classList.remove('opacity-80');
+      this.snapState.draggingWindow = false;
+      await this.handleSnapWindowDrop(event);
+    });
+
+    // Chụp màn hình
+    captureBtn.addEventListener('click', () => this.captureSnapWindow());
+
+    // Xóa điểm
+    clearBtn.addEventListener('click', () => this.clearSnapPoints());
+
+    // Start/Stop snap click
+    startBtn.addEventListener('click', () => this.startSnapClick());
+    stopBtn.addEventListener('click', () => this.stopSnapClick());
+
+    // Lắng nghe status từ main process
+    ipcRenderer.on('snap-click-status', (_event, payload) => {
+      if (typeof payload?.running === 'boolean') {
+        this.snapState.isRunning = payload.running;
+        this.toggleSnapButtons();
+      }
+      if (payload?.targetLost) {
+        this.snapState.targetWindow = null;
+        this.updateSnapTargetInfo();
+      }
+      if (payload?.message) {
+        this.showMessage(payload.message, payload.type || (payload.running ? 'success' : 'error'));
+      }
+    });
+
+    // Lắng nghe khi cửa sổ selector lưu dữ liệu
+    ipcRenderer.on('snap-selector-saved', (_event, payload) => {
+      if (payload?.success) {
+        // Cập nhật danh sách điểm
+        if (payload.points && Array.isArray(payload.points)) {
+          this.snapState.points.push(...payload.points);
+          this.renderSnapPoints();
+        }
+        this.showMessage(`Đã lưu ${payload.points?.length || 0} điểm snap.`, 'success');
+      } else {
+        this.showMessage(payload?.error || 'Không thể lưu điểm.', 'error');
+      }
+    });
+  }
+
+  async loadSnapConfig() {
+    try {
+      const config = await ipcRenderer.invoke('snap-load-config');
+      if (config && Array.isArray(config.points)) {
+        this.snapState.points = config.points;
+        this.renderSnapPoints();
+      }
+    } catch (error) {
+      console.warn('Không thể tải cấu hình snap click:', error);
+    }
+  }
+
+  async handleSnapWindowDrop(event) {
+    if (!event || (event.screenX === 0 && event.screenY === 0)) {
+      this.showMessage('Không ghi nhận được vị trí thả chuột.', 'error');
+      return;
+    }
+
+    try {
+      const result = await ipcRenderer.invoke('snap-detect-window', {
+        x: event.screenX,
+        y: event.screenY
+      });
+
+      if (result?.success) {
+        this.snapState.targetWindow = result.window;
+        this.updateSnapTargetInfo();
+        this.showMessage('Đã ghi nhận ứng dụng: ' + result.window.title, 'success');
+      } else {
+        this.showMessage(result?.error || 'Không xác định được ứng dụng.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  updateSnapTargetInfo() {
+    const infoEl = this.snapElements.targetInfo;
+    const captureBtn = this.snapElements.captureBtn;
+    
+    if (!infoEl) return;
+
+    if (captureBtn) {
+      captureBtn.disabled = !this.snapState.targetWindow;
+    }
+
+    infoEl.classList.remove('text-green-600', 'font-semibold');
+    infoEl.classList.add('text-gray-600');
+
+    if (this.snapState.targetWindow) {
+      infoEl.textContent = `${this.snapState.targetWindow.title} (PID ${this.snapState.targetWindow.pid})`;
+      infoEl.classList.remove('text-gray-600');
+      infoEl.classList.add('text-green-600', 'font-semibold');
+    } else {
+      infoEl.textContent = 'Chưa chọn ứng dụng';
+    }
+  }
+
+  async captureSnapWindow() {
+    if (!this.snapState.targetWindow) {
+      this.showMessage('Vui lòng chọn ứng dụng trước.', 'error');
+      return;
+    }
+
+    try {
+      this.showMessage('Đang chụp màn hình...', 'success');
+      const result = await ipcRenderer.invoke('snap-capture-window', this.snapState.targetWindow);
+
+      if (result?.success && result.dataUrl) {
+        // Cửa sổ selector sẽ được mở tự động từ controller
+        this.showMessage('Đã chụp màn hình. Cửa sổ chọn điểm đã mở.', 'success');
+      } else {
+        this.showMessage(result?.error || 'Không thể chụp màn hình.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+
+  async saveSnapPoint(point) {
+    try {
+      const result = await ipcRenderer.invoke('snap-save-point', point);
+      if (result?.success) {
+        this.snapState.points.push(result.point);
+        this.renderSnapPoints();
+      } else {
+        this.showMessage(result?.error || 'Không thể lưu điểm.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  renderSnapPoints() {
+    const list = this.snapElements.pointsList;
+    if (!list) return;
+
+    if (this.snapState.points.length === 0) {
+      list.innerHTML = '<li class="text-gray-400">Chưa có điểm nào</li>';
+      return;
+    }
+
+    list.innerHTML = this.snapState.points.map((point, index) => `
+      <li class="flex items-center justify-between bg-indigo-50 text-indigo-700 px-2 py-1 rounded">
+        <span>#${index + 1} • X: ${point.offsetX} | Y: ${point.offsetY}</span>
+        <button class="text-red-500 text-xs font-bold" onclick="app.removeSnapPoint(${index})">✖</button>
+      </li>
+    `).join('');
+  }
+
+  async removeSnapPoint(index) {
+    try {
+      const result = await ipcRenderer.invoke('snap-delete-point', index);
+      if (result?.success) {
+        this.snapState.points = result.points || [];
+        this.renderSnapPoints();
+        this.showMessage('Đã xóa điểm', 'success');
+      } else {
+        this.showMessage(result?.error || 'Không thể xóa điểm.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  clearSnapPoints() {
+    this.snapState.points = [];
+    this.renderSnapPoints();
+    this.showMessage('Đã xóa tất cả điểm', 'success');
+  }
+
+  async startSnapClick() {
+    if (this.snapState.isRunning) {
+      this.showMessage('Snap click đang chạy.', 'error');
+      return;
+    }
+
+    if (!this.snapState.targetWindow) {
+      this.showMessage('Vui lòng chọn ứng dụng trước.', 'error');
+      return;
+    }
+
+    if (this.snapState.points.length === 0) {
+      this.showMessage('Hãy thêm ít nhất một điểm snap.', 'error');
+      return;
+    }
+
+    const interval = Math.max(500, parseInt(this.snapElements.intervalInput.value, 10) || 2000);
+    this.snapElements.intervalInput.value = interval;
+
+    try {
+      const result = await ipcRenderer.invoke('snap-start', {
+        interval,
+        points: this.snapState.points.map(({ offsetX, offsetY }) => ({ offsetX, offsetY }))
+      });
+
+      if (result?.success) {
+        this.snapState.isRunning = true;
+        this.toggleSnapButtons();
+        this.showMessage('Đang chạy snap click...', 'success');
+      } else {
+        this.showMessage(result?.error || 'Không khởi động được snap click.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  async stopSnapClick() {
+    if (!this.snapState.isRunning) {
+      return;
+    }
+
+    try {
+      await ipcRenderer.invoke('snap-stop');
+    } finally {
+      this.snapState.isRunning = false;
+      this.toggleSnapButtons();
+      this.showMessage('Đã dừng snap click.', 'success');
+    }
+  }
+
+  toggleSnapButtons() {
+    const { startBtn, stopBtn } = this.snapElements;
+    if (!startBtn || !stopBtn) return;
+
+    if (this.snapState.isRunning) {
+      startBtn.classList.add('hidden');
+      stopBtn.classList.remove('hidden');
+    } else {
+      startBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+    }
   }
 }
 

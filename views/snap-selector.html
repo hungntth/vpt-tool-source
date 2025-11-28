@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chọn điểm trên ảnh</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #1e1e1e;
+            color: #fff;
+            overflow: hidden;
+        }
+        .container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            background: #2d2d2d;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid #444;
+        }
+        .toolbar button {
+            padding: 6px 12px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .toolbar button:hover {
+            background: #005a9e;
+        }
+        .toolbar button.danger {
+            background: #d32f2f;
+        }
+        .toolbar button.danger:hover {
+            background: #b71c1c;
+        }
+        .toolbar .info {
+            margin-left: auto;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .image-container {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #1e1e1e;
+        }
+        .image-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        #snapImage {
+            max-width: 100%;
+            max-height: 100%;
+            display: block;
+            cursor: crosshair;
+            user-select: none;
+        }
+        .selection-box {
+            position: absolute;
+            border: 2px dashed #00ff00;
+            background: rgba(0, 255, 0, 0.1);
+            pointer-events: none;
+            display: none;
+        }
+        .click-point {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff0000;
+            border: 2px solid #fff;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+        }
+        .click-point::after {
+            content: attr(data-index);
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        .instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            line-height: 1.6;
+            z-index: 1000;
+        }
+        .instructions strong {
+            color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="toolbar">
+            <button id="clearSelectionBtn">🗑️ Xóa khu vực</button>
+            <button id="clearPointsBtn">🗑️ Xóa điểm</button>
+            <button id="clearAllBtn" class="danger">🗑️ Xóa tất cả</button>
+            <div class="info">
+                <span id="selectionInfo">Chưa chọn khu vực</span> | 
+                <span id="pointsInfo">0 điểm click</span>
+            </div>
+            <button id="saveBtn" style="margin-left: auto;">💾 Lưu và đóng</button>
+        </div>
+        <div class="image-container">
+            <div class="instructions">
+                <strong>Hướng dẫn:</strong><br>
+                • Chuột trái: Kéo để chọn khu vực so sánh<br>
+                • Chuột phải: Click để chọn điểm auto click<br>
+                • Khu vực: Dùng để tìm kiếm hình ảnh<br>
+                • Điểm: Vị trí sẽ được click tự động
+            </div>
+            <div class="image-wrapper">
+                <img id="snapImage" src="" alt="Screenshot">
+                <div class="selection-box" id="selectionBox"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        let imageElement = null;
+        let imageWrapper = null;
+        let selectionBox = null;
+        let isSelecting = false;
+        let startX = 0;
+        let startY = 0;
+        let currentSelection = null;
+        let clickPoints = [];
+        let imageScaleX = 1;
+        let imageScaleY = 1;
+        let imageOffsetX = 0;
+        let imageOffsetY = 0;
+
+        function init() {
+            imageElement = document.getElementById('snapImage');
+            imageWrapper = document.querySelector('.image-wrapper');
+            selectionBox = document.getElementById('selectionBox');
+
+            // Nhận dữ liệu ảnh từ main process
+            ipcRenderer.on('snap-image-data', (event, data) => {
+                if (data.imageDataUrl) {
+                    imageElement.src = data.imageDataUrl;
+                    imageElement.onload = () => {
+                        updateImageScale();
+                    };
+                }
+            });
+
+            // Chuột trái: Kéo để chọn khu vực
+            imageElement.addEventListener('mousedown', (e) => {
+                if (e.button === 0) { // Chuột trái
+                    e.preventDefault();
+                    isSelecting = true;
+                    const rect = imageElement.getBoundingClientRect();
+                    startX = e.clientX - rect.left;
+                    startY = e.clientY - rect.top;
+                    selectionBox.style.display = 'block';
+                    selectionBox.style.left = startX + 'px';
+                    selectionBox.style.top = startY + 'px';
+                    selectionBox.style.width = '0px';
+                    selectionBox.style.height = '0px';
+                }
+            });
+
+            imageElement.addEventListener('mousemove', (e) => {
+                if (isSelecting) {
+                    const rect = imageElement.getBoundingClientRect();
+                    const currentX = e.clientX - rect.left;
+                    const currentY = e.clientY - rect.top;
+                    
+                    const left = Math.min(startX, currentX);
+                    const top = Math.min(startY, currentY);
+                    const width = Math.abs(currentX - startX);
+                    const height = Math.abs(currentY - startY);
+
+                    selectionBox.style.left = left + 'px';
+                    selectionBox.style.top = top + 'px';
+                    selectionBox.style.width = width + 'px';
+                    selectionBox.style.height = height + 'px';
+                }
+            });
+
+            imageElement.addEventListener('mouseup', (e) => {
+                if (e.button === 0 && isSelecting) { // Chuột trái
+                    isSelecting = false;
+                    const rect = imageElement.getBoundingClientRect();
+                    const endX = e.clientX - rect.left;
+                    const endY = e.clientY - rect.top;
+                    
+                    const left = Math.min(startX, endX);
+                    const top = Math.min(startY, endY);
+                    const width = Math.abs(endX - startX);
+                    const height = Math.abs(endY - startY);
+
+                    if (width > 5 && height > 5) {
+                        // Chuyển đổi tọa độ từ ảnh hiển thị về ảnh gốc
+                        const scaleX = imageElement.naturalWidth / rect.width;
+                        const scaleY = imageElement.naturalHeight / rect.height;
+                        
+                        currentSelection = {
+                            x: Math.round(left * scaleX),
+                            y: Math.round(top * scaleY),
+                            width: Math.round(width * scaleX),
+                            height: Math.round(height * scaleY)
+                        };
+                        updateSelectionInfo();
+                    } else {
+                        selectionBox.style.display = 'none';
+                        currentSelection = null;
+                        updateSelectionInfo();
+                    }
+                }
+            });
+
+            // Chuột phải: Click để chọn điểm
+            imageElement.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const rect = imageElement.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // Chuyển đổi tọa độ từ ảnh hiển thị về ảnh gốc
+                const scaleX = imageElement.naturalWidth / rect.width;
+                const scaleY = imageElement.naturalHeight / rect.height;
+                
+                const offsetX = Math.round(x * scaleX);
+                const offsetY = Math.round(y * scaleY);
+
+                addClickPoint(offsetX, offsetY, x, y);
+            });
+
+            // Xử lý các nút
+            document.getElementById('clearSelectionBtn').addEventListener('click', () => {
+                currentSelection = null;
+                selectionBox.style.display = 'none';
+                updateSelectionInfo();
+            });
+
+            document.getElementById('clearPointsBtn').addEventListener('click', () => {
+                clickPoints = [];
+                renderClickPoints();
+            });
+
+            document.getElementById('clearAllBtn').addEventListener('click', () => {
+                currentSelection = null;
+                selectionBox.style.display = 'none';
+                clickPoints = [];
+                renderClickPoints();
+                updateSelectionInfo();
+            });
+
+            document.getElementById('saveBtn').addEventListener('click', () => {
+                ipcRenderer.send('snap-selector-save', {
+                    selection: currentSelection,
+                    points: clickPoints.map(p => ({ offsetX: p.offsetX, offsetY: p.offsetY }))
+                });
+            });
+
+            // Cập nhật scale khi resize
+            window.addEventListener('resize', updateImageScale);
+        }
+
+        function updateImageScale() {
+            if (!imageElement) return;
+            const rect = imageElement.getBoundingClientRect();
+            imageScaleX = imageElement.naturalWidth / rect.width;
+            imageScaleY = imageElement.naturalHeight / rect.height;
+            imageOffsetX = rect.left;
+            imageOffsetY = rect.top;
+        }
+
+        function addClickPoint(offsetX, offsetY, displayX, displayY) {
+            const point = {
+                offsetX,
+                offsetY,
+                displayX,
+                displayY,
+                id: Date.now() + Math.random()
+            };
+            clickPoints.push(point);
+            renderClickPoints();
+        }
+
+        function renderClickPoints() {
+            // Xóa tất cả điểm cũ
+            document.querySelectorAll('.click-point').forEach(el => el.remove());
+
+            // Vẽ điểm mới
+            clickPoints.forEach((point, index) => {
+                const pointEl = document.createElement('div');
+                pointEl.className = 'click-point';
+                pointEl.style.left = point.displayX + 'px';
+                pointEl.style.top = point.displayY + 'px';
+                pointEl.setAttribute('data-index', index + 1);
+                imageWrapper.appendChild(pointEl);
+            });
+
+            updatePointsInfo();
+        }
+
+        function updateSelectionInfo() {
+            const infoEl = document.getElementById('selectionInfo');
+            if (currentSelection) {
+                infoEl.textContent = `Khu vực: ${currentSelection.width}x${currentSelection.height} tại (${currentSelection.x}, ${currentSelection.y})`;
+            } else {
+                infoEl.textContent = 'Chưa chọn khu vực';
+            }
+        }
+
+        function updatePointsInfo() {
+            const infoEl = document.getElementById('pointsInfo');
+            infoEl.textContent = `${clickPoints.length} điểm click`;
+        }
+
+        // Khởi tạo khi DOM ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
+

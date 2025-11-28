@@ -2,9 +2,17 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const DataModel = require('./models/DataModel');
 const ItemController = require('./controllers/ItemController');
+const FlashController = require('./controllers/FlashController');
+const AutoClickController = require('./controllers/AutoClickController');
+const RecordClickController = require('./controllers/RecordClickController');
+const SnapClickController = require('./controllers/SnapClickController');
 
 let mainWindow;
 let itemController;
+let flashController;
+let autoClickController;
+let recordClickController;
+let snapClickController;
 
 // Đường dẫn file lưu trữ dữ liệu
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -30,9 +38,13 @@ function createWindow() {
   // Load file HTML từ views
   mainWindow.loadFile(path.join(__dirname, 'views', 'index.html'));
 
-  // Khởi tạo Model và Controller
+  // Khởi tạo Model và Controllers
   const dataModel = new DataModel(DATA_FILE);
   itemController = new ItemController(dataModel, ipcMain, mainWindow, __dirname);
+  flashController = new FlashController(ipcMain, mainWindow, __dirname);
+  autoClickController = new AutoClickController(ipcMain, mainWindow, __dirname);
+  recordClickController = new RecordClickController(ipcMain, mainWindow, __dirname);
+  snapClickController = new SnapClickController(ipcMain, mainWindow, __dirname);
 
   mainWindow.on('closed', () => {
     mainWindow = null;

@@ -13,6 +13,8 @@
             <div class="flex items-center gap-1">
                 <button type="button" id="navLinksTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-indigo-400 bg-indigo-500 text-white transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🔗 Quản lý link</button>
                 <button type="button" id="navAutoTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🖱️ Auto click</button>
+                <button type="button" id="navRecordTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🎬 Record click</button>
+                <button type="button" id="navSnapTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">📸 Snap click</button>
             </div>
 
             <div id="linksPanel" class="overflow-x-auto overflow-y-auto rounded-md border border-gray-200 flex-1 min-h-0">
@@ -109,6 +111,78 @@
                         <button type="button" id="autoStopBtn" class="flex-1 btn btn-danger hidden">⏹ Dừng auto</button>
                     </div>
                     <p class="text-[10px] text-gray-500">*Giữ chuột tại nút, kéo sang app/điểm cần lấy rồi thả chuột để ghi nhận.</p>
+                </div>
+            </div>
+
+            <div id="recordPanel" class="bg-gray-50 p-2 rounded border border-indigo-100 hidden flex-shrink-0">
+                <div class="flex flex-col gap-2 w-full text-[11px]">
+                    <div class="text-gray-600 leading-tight">
+                        <p class="font-semibold mb-0.5 text-indigo-600">🎬 Ghi lại các bước click</p>
+                        <p>Chọn ứng dụng, sau đó nhấn Record để bắt đầu ghi lại các click.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="recordPickWindowBtn" draggable="true" class="flex-1 px-2 py-1 rounded bg-indigo-500 text-white font-semibold hover:bg-indigo-600 transition-colors duration-200 text-xs">🖥️ Kéo sang ứng dụng</button>
+                        <div id="recordTargetInfo" class="flex-1 px-2 py-1 rounded border border-dashed border-indigo-300 text-center text-gray-600 bg-white min-h-[32px] flex items-center justify-center">
+                            Chưa chọn ứng dụng
+                        </div>
+                    </div>
+                    <div class="border border-gray-200 rounded p-2 bg-white max-h-32 overflow-y-auto">
+                        <p class="text-[10px] font-semibold text-gray-500 uppercase mb-1 tracking-wide">Danh sách điểm đã ghi</p>
+                        <ul id="recordPointsList" class="space-y-1 text-gray-700 text-[11px]">
+                            <li class="text-gray-400">Chưa có điểm nào</li>
+                        </ul>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="recordStartBtn" class="flex-1 btn btn-primary">🔴 Bắt đầu Record</button>
+                        <button type="button" id="recordStopBtn" class="flex-1 btn btn-danger hidden">⏹ Dừng Record</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="recordClearBtn" class="flex-1 btn btn-secondary">🧹 Xóa điểm</button>
+                        <button type="button" id="recordSaveBtn" class="flex-1 btn btn-success">💾 Lưu profile</button>
+                    </div>
+                    <div class="border border-indigo-200 rounded p-2 bg-white">
+                        <p class="text-[10px] font-semibold text-gray-600 uppercase mb-1 tracking-wide">Tên profile</p>
+                        <input type="text" id="recordProfileName" placeholder="VD: Record click 1" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <p class="text-[10px] text-gray-500">*Ứng dụng đã chọn sẽ không được lưu, chỉ lưu các điểm click.</p>
+                </div>
+            </div>
+
+            <div id="snapPanel" class="bg-gray-50 p-2 rounded border border-indigo-100 hidden flex-shrink-0">
+                <div class="flex flex-col gap-2 w-full text-[11px]">
+                    <div class="text-gray-600 leading-tight">
+                        <p class="font-semibold mb-0.5 text-indigo-600">📸 Snap Click - Auto click dựa trên hình ảnh</p>
+                        <p>Chụp màn hình ứng dụng, chọn điểm trên ảnh để auto click khi có điểm đó xuất hiện.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="snapPickWindowBtn" draggable="true" class="flex-1 px-2 py-1 rounded bg-indigo-500 text-white font-semibold hover:bg-indigo-600 transition-colors duration-200 text-xs">🖥️ Kéo sang ứng dụng</button>
+                        <div id="snapTargetInfo" class="flex-1 px-2 py-1 rounded border border-dashed border-indigo-300 text-center text-gray-600 bg-white min-h-[32px] flex items-center justify-center">
+                            Chưa chọn ứng dụng
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="snapCaptureBtn" class="flex-1 px-2 py-1 rounded bg-purple-500 text-white font-semibold hover:bg-purple-600 transition-colors duration-200 text-xs disabled:opacity-60 disabled:pointer-events-none" disabled>📷 Chụp màn hình</button>
+                        <button type="button" id="snapClearBtn" class="px-2 py-1 text-xs font-semibold rounded border border-gray-300 text-gray-600 hover:bg-gray-100">🧹 Xóa điểm</button>
+                    </div>
+                    <div id="snapImageContainer" class="border border-gray-200 rounded p-2 bg-white hidden max-h-48 overflow-auto">
+                        <p class="text-[10px] font-semibold text-gray-500 uppercase mb-1 tracking-wide">Ảnh đã chụp - Click vào ảnh để chọn điểm</p>
+                        <img id="snapImage" src="" alt="Screenshot" class="max-w-full cursor-crosshair border border-gray-300 rounded">
+                    </div>
+                    <div class="border border-gray-200 rounded p-2 bg-white max-h-28 overflow-y-auto">
+                        <p class="text-[10px] font-semibold text-gray-500 uppercase mb-1 tracking-wide">Danh sách điểm snap</p>
+                        <ul id="snapPointsList" class="space-y-1 text-gray-700 text-[11px]">
+                            <li class="text-gray-400">Chưa có điểm nào</li>
+                        </ul>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <label for="snapInterval" class="text-gray-600 font-semibold whitespace-nowrap">Khoảng lặp (ms)</label>
+                        <input type="number" id="snapInterval" min="500" value="2000" class="flex-1 px-2 py-1 border border-gray-300 rounded text-right text-xs focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="snapStartBtn" class="flex-1 btn btn-primary">▶️ Chạy snap click</button>
+                        <button type="button" id="snapStopBtn" class="flex-1 btn btn-danger hidden">⏹ Dừng snap click</button>
+                    </div>
+                    <p class="text-[10px] text-gray-500">*Chụp màn hình ứng dụng, click vào ảnh để chọn điểm cần auto click.</p>
                 </div>
             </div>
         </div>
