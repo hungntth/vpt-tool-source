@@ -4,17 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPT TOOLS</title>
-    <link rel="icon" type="image/x-icon" href="../favicon.ico">
+    <link rel="icon" type="image/x-icon" href="../assets/icons/icon.jpg">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="font-sans bg-gradient-to-br from-indigo-500 to-purple-600 p-2 min-h-screen text-gray-800 overflow-hidden">
     <div class="w-full h-[400px] mx-auto bg-white rounded-lg shadow-xl overflow-hidden flex flex-col">
         <div class="p-2.5 overflow-y-auto flex-1 flex flex-col gap-2">
             <div class="flex items-center gap-1">
-                <button type="button" id="navLinksTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-indigo-400 bg-indigo-500 text-white transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🔗 Quản lý link</button>
-                <button type="button" id="navAutoTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🖱️ Auto click</button>
-                <button type="button" id="navRecordTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🎬 Record click</button>
-                <button type="button" id="navSnapTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">📸 Snap click</button>
+                <button type="button" id="navLinksTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-indigo-400 bg-indigo-500 text-white transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🔗 Links</button>
+                <button type="button" id="navAutoTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🖱️ Click</button>
+                <button type="button" id="navRecordTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">🎬 Record</button>
+                <button type="button" id="navSnapTab" class="flex-1 text-xs font-semibold px-2 py-1 rounded border border-transparent text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-300">📸 Snap</button>
             </div>
 
             <div id="linksPanel" class="overflow-x-auto overflow-y-auto rounded-md border border-gray-200 flex-1 min-h-0">
@@ -181,6 +181,20 @@
                     <div class="flex items-center gap-2">
                         <button type="button" id="snapStartBtn" class="flex-1 btn btn-primary">▶️ Chạy snap click</button>
                         <button type="button" id="snapStopBtn" class="flex-1 btn btn-danger hidden">⏹ Dừng snap click</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="snapSaveProfileBtn" class="flex-1 btn btn-success">💾 Lưu kịch bản</button>
+                        <button type="button" id="snapLoadProfileBtn" class="flex-1 btn btn-secondary">📂 Load kịch bản</button>
+                    </div>
+                    <div class="border border-indigo-200 rounded p-2 bg-white">
+                        <p class="text-[10px] font-semibold text-gray-600 uppercase mb-1 tracking-wide">Tên kịch bản</p>
+                        <input type="text" id="snapProfileName" placeholder="VD: Snap click 1" class="w-full px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div class="border border-gray-200 rounded p-2 bg-white max-h-28 overflow-y-auto">
+                        <p class="text-[10px] font-semibold text-gray-500 uppercase mb-1 tracking-wide">Danh sách kịch bản</p>
+                        <ul id="snapProfilesList" class="space-y-1 text-gray-700 text-[11px]">
+                            <li class="text-gray-400">Chưa có kịch bản nào</li>
+                        </ul>
                     </div>
                     <p class="text-[10px] text-gray-500">*Chụp màn hình ứng dụng, click vào ảnh để chọn điểm cần auto click.</p>
                 </div>

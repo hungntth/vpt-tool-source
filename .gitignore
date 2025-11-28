@@ -8,3 +8,6 @@ Thumbs.db
 data.json
 auto-profiles.json
 auto-config.json
+snap-profiles.json
+snap-config.json
+snap/

@@ -80,6 +80,9 @@
             pointer-events: none;
             display: none;
         }
+        .selection-box.active {
+            display: block;
+        }
         .click-point {
             position: absolute;
             width: 12px;
@@ -142,7 +145,6 @@
             </div>
             <div class="image-wrapper">
                 <img id="snapImage" src="" alt="Screenshot">
-                <div class="selection-box" id="selectionBox"></div>
             </div>
         </div>
     </div>
@@ -151,29 +153,124 @@
 
         let imageElement = null;
         let imageWrapper = null;
-        let selectionBox = null;
         let isSelecting = false;
         let startX = 0;
         let startY = 0;
-        let currentSelection = null;
-        let clickPoints = [];
+        let currentSelections = []; // Mảng các selection đang được vẽ
+        let currentSelectionIndex = -1; // Index của selection đang được vẽ
+        let clickPoints = []; // Mỗi điểm có selections: [{offsetX, offsetY, selections: [{x, y, width, height}]}]
         let imageScaleX = 1;
         let imageScaleY = 1;
         let imageOffsetX = 0;
         let imageOffsetY = 0;
+        let currentImagePath = null;
+        let tempSelectionBox = null; // Selection box tạm khi đang vẽ
 
         function init() {
-            imageElement = document.getElementById('snapImage');
-            imageWrapper = document.querySelector('.image-wrapper');
-            selectionBox = document.getElementById('selectionBox');
+            try {
+                imageElement = document.getElementById('snapImage');
+                imageWrapper = document.querySelector('.image-wrapper');
+
+                if (!imageElement) {
+                    console.error('[Snap Selector] Lỗi: Không tìm thấy element #snapImage');
+                    return;
+                }
+                if (!imageWrapper) {
+                    console.error('[Snap Selector] Lỗi: Không tìm thấy element .image-wrapper');
+                    return;
+                }
+                
+                // Tạo selection box tạm
+                tempSelectionBox = document.createElement('div');
+                tempSelectionBox.className = 'selection-box';
+                imageWrapper.appendChild(tempSelectionBox);
+
+                console.log('[Snap Selector] Đã khởi tạo thành công');
+            } catch (error) {
+                console.error('[Snap Selector] Lỗi khi khởi tạo:', error);
+                return;
+            }
 
             // Nhận dữ liệu ảnh từ main process
             ipcRenderer.on('snap-image-data', (event, data) => {
-                if (data.imageDataUrl) {
+                try {
+                    console.log('[Snap Selector] Nhận dữ liệu ảnh:', { 
+                        hasDataUrl: !!data?.imageDataUrl,
+                        hasImagePath: !!data?.imagePath,
+                        hasWindowRect: !!data?.windowRect,
+                        hasEditData: !!data?.editData
+                    });
+                    
+                    if (!data) {
+                        console.error('[Snap Selector] Lỗi: Không có dữ liệu nhận được');
+                        return;
+                    }
+                    
+                    if (!data.imageDataUrl) {
+                        console.error('[Snap Selector] Lỗi: Không có imageDataUrl trong dữ liệu:', data);
+                        return;
+                    }
+                    
+                    if (!imageElement) {
+                        console.error('[Snap Selector] Lỗi: imageElement chưa được khởi tạo');
+                        return;
+                    }
+                    
+                    // Lưu imagePath
+                    currentImagePath = data.imagePath || null;
+                    
+                    // Reset các điểm và selections trước khi load ảnh mới
+                    clickPoints = [];
+                    currentSelections = [];
+                    currentSelectionIndex = -1;
+                    clearAllSelectionBoxes();
+                    
                     imageElement.src = data.imageDataUrl;
                     imageElement.onload = () => {
-                        updateImageScale();
+                        try {
+                            console.log('[Snap Selector] Ảnh đã load thành công:', {
+                                naturalWidth: imageElement.naturalWidth,
+                                naturalHeight: imageElement.naturalHeight,
+                                width: imageElement.width,
+                                height: imageElement.height
+                            });
+                            updateImageScale();
+                            
+                            // Nếu có editData, load lại các điểm và selection cũ
+                            if (data.editData) {
+                                console.log('[Snap Selector] Đang load dữ liệu edit:', data.editData);
+                                
+                                // Load điểm click nếu có
+                                if (typeof data.editData.offsetX === 'number' && typeof data.editData.offsetY === 'number') {
+                                    const rect = imageElement.getBoundingClientRect();
+                                    const scaleX = rect.width / imageElement.naturalWidth;
+                                    const scaleY = rect.height / imageElement.naturalHeight;
+                                    
+                                    const displayX = data.editData.offsetX * scaleX;
+                                    const displayY = data.editData.offsetY * scaleY;
+                                    
+                                    // Load selections nếu có (có thể là mảng hoặc object đơn)
+                                    let selections = [];
+                                    if (data.editData.selections && Array.isArray(data.editData.selections)) {
+                                        selections = data.editData.selections;
+                                    } else if (data.editData.selection) {
+                                        // Backward compatibility: nếu có selection đơn, chuyển thành mảng
+                                        selections = [data.editData.selection];
+                                    }
+                                    
+                                    addClickPoint(data.editData.offsetX, data.editData.offsetY, displayX, displayY, selections);
+                                }
+                            }
+                        } catch (error) {
+                            console.error('[Snap Selector] Lỗi trong imageElement.onload:', error);
+                        }
                     };
+                    imageElement.onerror = (error) => {
+                        console.error('[Snap Selector] Lỗi khi load ảnh:', error);
+                        console.error('[Snap Selector] imageDataUrl length:', data.imageDataUrl?.length);
+                    };
+                } catch (error) {
+                    console.error('[Snap Selector] Lỗi khi xử lý snap-image-data:', error);
                 }
             });
 
@@ -185,16 +282,20 @@
                     const rect = imageElement.getBoundingClientRect();
                     startX = e.clientX - rect.left;
                     startY = e.clientY - rect.top;
-                    selectionBox.style.display = 'block';
-                    selectionBox.style.left = startX + 'px';
-                    selectionBox.style.top = startY + 'px';
-                    selectionBox.style.width = '0px';
-                    selectionBox.style.height = '0px';
+                    currentSelectionIndex = currentSelections.length;
+                    currentSelections.push({ x: startX, y: startY, width: 0, height: 0 });
+                    if (tempSelectionBox) {
+                        tempSelectionBox.style.display = 'block';
+                        tempSelectionBox.style.left = startX + 'px';
+                        tempSelectionBox.style.top = startY + 'px';
+                        tempSelectionBox.style.width = '0px';
+                        tempSelectionBox.style.height = '0px';
+                    }
                 }
             });
 
             imageElement.addEventListener('mousemove', (e) => {
-                if (isSelecting) {
+                if (isSelecting && currentSelectionIndex >= 0) {
                     const rect = imageElement.getBoundingClientRect();
                     const currentX = e.clientX - rect.left;
                     const currentY = e.clientY - rect.top;
@@ -204,10 +305,17 @@
                     const width = Math.abs(currentX - startX);
                     const height = Math.abs(currentY - startY);
 
-                    selectionBox.style.left = left + 'px';
-                    selectionBox.style.top = top + 'px';
-                    selectionBox.style.width = width + 'px';
-                    selectionBox.style.height = height + 'px';
+                    if (tempSelectionBox) {
+                        tempSelectionBox.style.left = left + 'px';
+                        tempSelectionBox.style.top = top + 'px';
+                        tempSelectionBox.style.width = width + 'px';
+                        tempSelectionBox.style.height = height + 'px';
+                    }
+                    
+                    // Cập nhật selection trong mảng
+                    if (currentSelections[currentSelectionIndex]) {
+                        currentSelections[currentSelectionIndex] = { x: left, y: top, width, height };
+                    }
                 }
             });
 
@@ -228,16 +336,29 @@
                         const scaleX = imageElement.naturalWidth / rect.width;
                         const scaleY = imageElement.naturalHeight / rect.height;
                         
-                        currentSelection = {
+                        const selection = {
                             x: Math.round(left * scaleX),
                             y: Math.round(top * scaleY),
                             width: Math.round(width * scaleX),
                             height: Math.round(height * scaleY)
                         };
+                        
+                        // Cập nhật selection trong mảng
+                        if (currentSelectionIndex >= 0 && currentSelections[currentSelectionIndex]) {
+                            currentSelections[currentSelectionIndex] = selection;
+                            renderSelectionBoxes();
+                        }
                         updateSelectionInfo();
                     } else {
-                        selectionBox.style.display = 'none';
-                        currentSelection = null;
+                        // Xóa selection nhỏ quá
+                        if (currentSelectionIndex >= 0) {
+                            currentSelections.splice(currentSelectionIndex, 1);
+                            currentSelectionIndex = -1;
+                        }
+                        if (tempSelectionBox) {
+                            tempSelectionBox.style.display = 'none';
+                        }
+                        renderSelectionBoxes();
                         updateSelectionInfo();
                     }
                 }
@@ -245,25 +366,122 @@
 
             // Chuột phải: Click để chọn điểm
             imageElement.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                const rect = imageElement.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
-                // Chuyển đổi tọa độ từ ảnh hiển thị về ảnh gốc
-                const scaleX = imageElement.naturalWidth / rect.width;
-                const scaleY = imageElement.naturalHeight / rect.height;
-                
-                const offsetX = Math.round(x * scaleX);
-                const offsetY = Math.round(y * scaleY);
+                try {
+                    e.preventDefault();
+                    
+                    if (!imageElement) {
+                        console.error('[Snap Selector] Lỗi: imageElement không tồn tại khi click chuột phải');
+                        return;
+                    }
+                    
+                    const rect = imageElement.getBoundingClientRect();
+                    console.log('[Snap Selector] Click chuột phải:', {
+                        clientX: e.clientX,
+                        clientY: e.clientY,
+                        rectLeft: rect.left,
+                        rectTop: rect.top,
+                        rectWidth: rect.width,
+                        rectHeight: rect.height,
+                        naturalWidth: imageElement.naturalWidth,
+                        naturalHeight: imageElement.naturalHeight
+                    });
+                    
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    
+                    if (imageElement.naturalWidth === 0 || imageElement.naturalHeight === 0) {
+                        console.error('[Snap Selector] Lỗi: Ảnh chưa load hoặc kích thước không hợp lệ:', {
+                            naturalWidth: imageElement.naturalWidth,
+                            naturalHeight: imageElement.naturalHeight
+                        });
+                        return;
+                    }
+                    
+                    if (rect.width === 0 || rect.height === 0) {
+                        console.error('[Snap Selector] Lỗi: Kích thước rect không hợp lệ:', {
+                            rectWidth: rect.width,
+                            rectHeight: rect.height
+                        });
+                        return;
+                    }
+                    
+                    // Chuyển đổi tọa độ từ ảnh hiển thị về ảnh gốc
+                    const scaleX = imageElement.naturalWidth / rect.width;
+                    const scaleY = imageElement.naturalHeight / rect.height;
+                    
+                    if (!isFinite(scaleX) || !isFinite(scaleY)) {
+                        console.error('[Snap Selector] Lỗi: Scale không hợp lệ:', {
+                            scaleX: scaleX,
+                            scaleY: scaleY,
+                            naturalWidth: imageElement.naturalWidth,
+                            naturalHeight: imageElement.naturalHeight,
+                            rectWidth: rect.width,
+                            rectHeight: rect.height
+                        });
+                        return;
+                    }
+                    
+                    const offsetX = Math.round(x * scaleX);
+                    const offsetY = Math.round(y * scaleY);
+                    
+                    console.log('[Snap Selector] Tọa độ đã tính:', {
+                        displayX: x,
+                        displayY: y,
+                        scaleX: scaleX,
+                        scaleY: scaleY,
+                        offsetX: offsetX,
+                        offsetY: offsetY
+                    });
 
-                addClickPoint(offsetX, offsetY, x, y);
+                    // Tự động tạo selection nhỏ xung quanh điểm (20x20 pixel)
+                    const selectionSize = 20;
+                    const selectionX = Math.max(0, Math.round((x * scaleX) - selectionSize / 2));
+                    const selectionY = Math.max(0, Math.round((y * scaleY) - selectionSize / 2));
+                    const selectionWidth = Math.min(selectionSize, imageElement.naturalWidth - selectionX);
+                    const selectionHeight = Math.min(selectionSize, imageElement.naturalHeight - selectionY);
+                    
+                    const autoSelection = {
+                        x: selectionX,
+                        y: selectionY,
+                        width: selectionWidth,
+                        height: selectionHeight
+                    };
+                    
+                    // Thêm các selections hiện tại vào điểm mới (nếu có)
+                    const selections = currentSelections.length > 0 
+                        ? currentSelections.map(s => {
+                            const scaleX2 = imageElement.naturalWidth / rect.width;
+                            const scaleY2 = imageElement.naturalHeight / rect.height;
+                            return {
+                                x: Math.round(s.x * scaleX2),
+                                y: Math.round(s.y * scaleY2),
+                                width: Math.round(s.width * scaleX2),
+                                height: Math.round(s.height * scaleY2)
+                            };
+                        })
+                        : [];
+                    
+                    // Thêm auto selection vào đầu mảng
+                    selections.unshift(autoSelection);
+                    
+                    // Reset selections hiện tại
+                    currentSelections = [];
+                    currentSelectionIndex = -1;
+                    if (tempSelectionBox) {
+                        tempSelectionBox.style.display = 'none';
+                    }
+
+                    addClickPoint(offsetX, offsetY, x, y, selections);
+                } catch (error) {
+                    console.error('[Snap Selector] Lỗi khi xử lý contextmenu:', error);
+                }
             });
 
             // Xử lý các nút
             document.getElementById('clearSelectionBtn').addEventListener('click', () => {
-                currentSelection = null;
-                selectionBox.style.display = 'none';
+                currentSelections = [];
+                currentSelectionIndex = -1;
+                clearAllSelectionBoxes();
                 updateSelectionInfo();
             });
 
@@ -273,66 +491,208 @@
             });
 
             document.getElementById('clearAllBtn').addEventListener('click', () => {
-                currentSelection = null;
-                selectionBox.style.display = 'none';
+                currentSelections = [];
+                currentSelectionIndex = -1;
+                clearAllSelectionBoxes();
                 clickPoints = [];
                 renderClickPoints();
                 updateSelectionInfo();
             });
 
             document.getElementById('saveBtn').addEventListener('click', () => {
+                // Lưu các điểm với selections của chúng
+                const points = clickPoints.map(p => ({
+                    offsetX: p.offsetX,
+                    offsetY: p.offsetY,
+                    selections: p.selections || []
+                }));
+                
                 ipcRenderer.send('snap-selector-save', {
-                    selection: currentSelection,
-                    points: clickPoints.map(p => ({ offsetX: p.offsetX, offsetY: p.offsetY }))
+                    points: points,
+                    imagePath: currentImagePath
                 });
             });
 
             // Cập nhật scale khi resize
-            window.addEventListener('resize', updateImageScale);
+            window.addEventListener('resize', () => {
+                updateImageScale();
+                renderSelectionBoxes();
+                renderClickPoints();
+            });
         }
 
         function updateImageScale() {
-            if (!imageElement) return;
-            const rect = imageElement.getBoundingClientRect();
-            imageScaleX = imageElement.naturalWidth / rect.width;
-            imageScaleY = imageElement.naturalHeight / rect.height;
-            imageOffsetX = rect.left;
-            imageOffsetY = rect.top;
+            try {
+                if (!imageElement) {
+                    console.error('[Snap Selector] Lỗi: imageElement không tồn tại trong updateImageScale');
+                    return;
+                }
+                
+                const rect = imageElement.getBoundingClientRect();
+                
+                if (rect.width === 0 || rect.height === 0) {
+                    console.warn('[Snap Selector] Cảnh báo: Kích thước rect = 0:', {
+                        rectWidth: rect.width,
+                        rectHeight: rect.height
+                    });
+                    return;
+                }
+                
+                if (imageElement.naturalWidth === 0 || imageElement.naturalHeight === 0) {
+                    console.warn('[Snap Selector] Cảnh báo: Kích thước ảnh tự nhiên = 0:', {
+                        naturalWidth: imageElement.naturalWidth,
+                        naturalHeight: imageElement.naturalHeight
+                    });
+                    return;
+                }
+                
+                imageScaleX = imageElement.naturalWidth / rect.width;
+                imageScaleY = imageElement.naturalHeight / rect.height;
+                imageOffsetX = rect.left;
+                imageOffsetY = rect.top;
+                
+                console.log('[Snap Selector] Đã cập nhật scale:', {
+                    scaleX: imageScaleX,
+                    scaleY: imageScaleY,
+                    offsetX: imageOffsetX,
+                    offsetY: imageOffsetY
+                });
+            } catch (error) {
+                console.error('[Snap Selector] Lỗi trong updateImageScale:', error);
+            }
         }
 
-        function addClickPoint(offsetX, offsetY, displayX, displayY) {
-            const point = {
-                offsetX,
-                offsetY,
-                displayX,
-                displayY,
-                id: Date.now() + Math.random()
-            };
-            clickPoints.push(point);
-            renderClickPoints();
+        function addClickPoint(offsetX, offsetY, displayX, displayY, selections = []) {
+            try {
+                if (typeof offsetX !== 'number' || typeof offsetY !== 'number' || 
+                    typeof displayX !== 'number' || typeof displayY !== 'number') {
+                    console.error('[Snap Selector] Lỗi: Tọa độ không hợp lệ:', {
+                        offsetX: offsetX,
+                        offsetY: offsetY,
+                        displayX: displayX,
+                        displayY: displayY
+                    });
+                    return;
+                }
+                
+                if (!imageWrapper) {
+                    console.error('[Snap Selector] Lỗi: imageWrapper không tồn tại');
+                    return;
+                }
+                
+                const point = {
+                    offsetX,
+                    offsetY,
+                    displayX,
+                    displayY,
+                    selections: Array.isArray(selections) ? selections : [],
+                    id: Date.now() + Math.random()
+                };
+                
+                console.log('[Snap Selector] Thêm điểm click:', point);
+                clickPoints.push(point);
+                renderClickPoints();
+                renderSelectionBoxes();
+            } catch (error) {
+                console.error('[Snap Selector] Lỗi trong addClickPoint:', error);
+            }
         }
 
         function renderClickPoints() {
-            // Xóa tất cả điểm cũ
-            document.querySelectorAll('.click-point').forEach(el => el.remove());
+            try {
+                if (!imageWrapper) {
+                    console.error('[Snap Selector] Lỗi: imageWrapper không tồn tại trong renderClickPoints');
+                    return;
+                }
+                
+                // Xóa tất cả điểm cũ
+                document.querySelectorAll('.click-point').forEach(el => el.remove());
 
-            // Vẽ điểm mới
-            clickPoints.forEach((point, index) => {
-                const pointEl = document.createElement('div');
-                pointEl.className = 'click-point';
-                pointEl.style.left = point.displayX + 'px';
-                pointEl.style.top = point.displayY + 'px';
-                pointEl.setAttribute('data-index', index + 1);
-                imageWrapper.appendChild(pointEl);
+                console.log('[Snap Selector] Render điểm click, số lượng:', clickPoints.length);
+
+                // Vẽ điểm mới
+                clickPoints.forEach((point, index) => {
+                    try {
+                        if (!point || typeof point.displayX !== 'number' || typeof point.displayY !== 'number') {
+                            console.error('[Snap Selector] Lỗi: Điểm không hợp lệ tại index', index, point);
+                            return;
+                        }
+                        
+                        const pointEl = document.createElement('div');
+                        pointEl.className = 'click-point';
+                        pointEl.style.left = point.displayX + 'px';
+                        pointEl.style.top = point.displayY + 'px';
+                        pointEl.setAttribute('data-index', index + 1);
+                        imageWrapper.appendChild(pointEl);
+                    } catch (error) {
+                        console.error('[Snap Selector] Lỗi khi render điểm tại index', index, ':', error);
+                    }
+                });
+
+                updatePointsInfo();
+            } catch (error) {
+                console.error('[Snap Selector] Lỗi trong renderClickPoints:', error);
+            }
+        }
+
+        function clearAllSelectionBoxes() {
+            if (!imageWrapper) return;
+            document.querySelectorAll('.selection-box:not(#tempSelectionBox)').forEach(box => {
+                if (box !== tempSelectionBox) {
+                    box.remove();
+                }
             });
+        }
 
-            updatePointsInfo();
+        function renderSelectionBoxes() {
+            if (!imageWrapper || !imageElement) return;
+            
+            // Xóa tất cả selection boxes cũ (trừ temp)
+            clearAllSelectionBoxes();
+            
+            const rect = imageElement.getBoundingClientRect();
+            const scaleX = rect.width / imageElement.naturalWidth;
+            const scaleY = rect.height / imageElement.naturalHeight;
+            
+            // Render selections cho các điểm đã lưu
+            clickPoints.forEach((point, pointIndex) => {
+                if (point.selections && Array.isArray(point.selections)) {
+                    point.selections.forEach((sel, selIndex) => {
+                        const box = document.createElement('div');
+                        box.className = 'selection-box active';
+                        box.style.left = (sel.x * scaleX) + 'px';
+                        box.style.top = (sel.y * scaleY) + 'px';
+                        box.style.width = (sel.width * scaleX) + 'px';
+                        box.style.height = (sel.height * scaleY) + 'px';
+                        box.setAttribute('data-point-index', pointIndex);
+                        box.setAttribute('data-selection-index', selIndex);
+                        imageWrapper.appendChild(box);
+                    });
+                }
+            });
+            
+            // Render selections đang được vẽ (chưa lưu)
+            currentSelections.forEach((sel, index) => {
+                if (index === currentSelectionIndex && tempSelectionBox) {
+                    // Đang vẽ, dùng temp box
+                    return;
+                }
+                const box = document.createElement('div');
+                box.className = 'selection-box active';
+                box.style.left = (sel.x * scaleX) + 'px';
+                box.style.top = (sel.y * scaleY) + 'px';
+                box.style.width = (sel.width * scaleX) + 'px';
+                box.style.height = (sel.height * scaleY) + 'px';
+                box.setAttribute('data-temp-index', index);
+                imageWrapper.appendChild(box);
+            });
         }
 
         function updateSelectionInfo() {
             const infoEl = document.getElementById('selectionInfo');
-            if (currentSelection) {
-                infoEl.textContent = `Khu vực: ${currentSelection.width}x${currentSelection.height} tại (${currentSelection.x}, ${currentSelection.y})`;
+            const totalSelections = clickPoints.reduce((sum, p) => sum + (p.selections?.length || 0), 0) + currentSelections.length;
+            if (totalSelections > 0) {
+                infoEl.textContent = `${totalSelections} khu vực so sánh`;
             } else {
                 infoEl.textContent = 'Chưa chọn khu vực';
             }

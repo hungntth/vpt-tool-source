@@ -47,6 +47,7 @@ class App {
     this.cacheDomElements();
     await this.loadAutoConfig();
     await this.loadAutoProfiles();
+    await this.loadSnapProfiles();
     this.setupEventListeners();
     this.toastEl = document.getElementById('toast');
     
@@ -101,8 +102,13 @@ class App {
       pointsList: document.getElementById('snapPointsList'),
       intervalInput: document.getElementById('snapInterval'),
       startBtn: document.getElementById('snapStartBtn'),
-      stopBtn: document.getElementById('snapStopBtn')
+      stopBtn: document.getElementById('snapStopBtn'),
+      saveProfileBtn: document.getElementById('snapSaveProfileBtn'),
+      loadProfileBtn: document.getElementById('snapLoadProfileBtn'),
+      profileNameInput: document.getElementById('snapProfileName'),
+      profilesList: document.getElementById('snapProfilesList')
     };
+    this.snapProfiles = [];
     this.dragGhostImage = this.createDragGhost();
   }
 
@@ -755,22 +761,67 @@ class App {
   }
 
   syncAutoSelections() {
-    const validProfileNames = new Set(this.autoProfiles.map((profile) => profile.name));
+    // Tạo set tất cả profile names (cả auto và snap)
+    const validProfileNames = new Set();
+    this.autoProfiles.forEach(p => validProfileNames.add(`auto:${p.name}`));
+    if (this.snapProfiles) {
+      this.snapProfiles.forEach(p => validProfileNames.add(`snap:${p.name}`));
+    }
+    
+    // Giữ lại các selection hợp lệ (cả format mới và cũ để backward compatibility)
     Object.keys(this.autoSelections).forEach((key) => {
-      if (!validProfileNames.has(this.autoSelections[key])) {
-        delete this.autoSelections[key];
+      const selected = this.autoSelections[key];
+      // Kiểm tra format mới (type:name)
+      if (selected.includes(':')) {
+        if (!validProfileNames.has(selected)) {
+          delete this.autoSelections[key];
+        }
+      } else {
+        // Format cũ - tìm trong auto profiles
+        const found = this.autoProfiles.find(p => p.name === selected);
+        if (!found) {
+          // Không tìm thấy trong auto, có thể là snap (format cũ)
+          const snapFound = this.snapProfiles?.find(p => p.name === selected);
+          if (snapFound) {
+            // Cập nhật sang format mới
+            this.autoSelections[key] = `snap:${selected}`;
+          } else {
+            delete this.autoSelections[key];
+          }
+        } else {
+          // Cập nhật sang format mới
+          this.autoSelections[key] = `auto:${selected}`;
+        }
       }
     });
   }
 
   renderAutoOptions(selectedName = '') {
-    if (!this.autoProfiles.length) {
+    const allProfiles = [];
+    
+    // Thêm auto profiles với prefix
+    this.autoProfiles.forEach(profile => {
+      allProfiles.push({ ...profile, type: 'auto', displayName: `🖱️ ${profile.name}` });
+    });
+    
+    // Chỉ thêm snap profiles nếu có ít nhất 1 auto profile
+    // (record profiles cũng được lưu vào auto profiles)
+    if (this.autoProfiles.length > 0 && this.snapProfiles && this.snapProfiles.length > 0) {
+      this.snapProfiles.forEach(profile => {
+        allProfiles.push({ ...profile, type: 'snap', displayName: `📸 ${profile.name}` });
+      });
+    }
+    
+    if (allProfiles.length === 0) {
       return '<option value="">Chưa có</option>';
     }
+    
     const defaultOption = '<option value="">Chọn</option>';
-    const options = this.autoProfiles.map((profile) => {
-      const isSelected = profile.name === selectedName ? 'selected' : '';
-      return `<option value="${this.escapeAttribute(profile.name)}" ${isSelected}>${this.escapeHtml(profile.name)}</option>`;
+    const options = allProfiles.map((profile) => {
+      // Lưu cả type và name: "auto:name" hoặc "snap:name"
+      const value = `${profile.type}:${profile.name}`;
+      const isSelected = value === selectedName || (selectedName && selectedName.includes(profile.name) && !selectedName.includes(':')) ? 'selected' : '';
+      return `<option value="${this.escapeAttribute(value)}" ${isSelected}>${this.escapeHtml(profile.displayName)}</option>`;
     }).join('');
     return defaultOption + options;
   }
@@ -786,13 +837,13 @@ class App {
   async runProfileForItem(itemId) {
     const profileName = this.autoSelections[itemId];
     if (!profileName) {
-      this.showMessage('Hãy chọn quy trình auto trước.', 'error');
+      this.showMessage('Hãy chọn quy trình trước.', 'error');
       return;
     }
 
     const profile = this.getProfileByName(profileName);
     if (!profile) {
-      this.showMessage('Quy trình auto không tồn tại.', 'error');
+      this.showMessage('Quy trình không tồn tại.', 'error');
       delete this.autoSelections[itemId];
       this.renderTable();
       return;
@@ -819,10 +870,43 @@ class App {
       return;
     }
 
-    // Áp dụng profile
+    // Xử lý theo loại profile
+    if (profile.type === 'snap') {
+      // Snap profile - cần points với template và selection
+      const interval = Math.max(500, Number(profile.interval) || 2000);
+      
+      if (!profile.points || profile.points.length === 0) {
+        this.showMessage('Kịch bản snap không có điểm nào.', 'error');
+        return;
+      }
+
+      try {
+        const result = await ipcRenderer.invoke('snap-start-for-item', itemId, {
+          targetWindow: {
+            pid: targetWindow.pid,
+            title: targetWindow.title,
+            handle: targetWindow.handle
+          },
+          interval,
+          points: profile.points // Bao gồm cả templateImagePath và selection
+        });
+
+        if (result?.success) {
+          this.itemAutoRunning[itemId] = true;
+          this.renderTable();
+          this.showMessage(`Đã chạy snap click cho "${item.ten}".`, 'success');
+        } else {
+          this.showMessage(result?.error || 'Không thể chạy snap click.', 'error');
+        }
+      } catch (error) {
+        this.showMessage('Lỗi: ' + error.message, 'error');
+      }
+      return;
+    }
+
+    // Auto profile - xử lý như cũ
     this.applyProfile(profile, { silent: true });
 
-    // Chạy auto cho item này với cửa sổ đã lưu
     const interval = Math.max(200, Number(profile.interval) || 1000);
     const points = (profile.points || []).map(({ offsetX, offsetY }) => ({ offsetX, offsetY }));
 
@@ -859,33 +943,69 @@ class App {
     this.itemAutoRunning[itemId] = false;
     this.renderTable();
     
+    const profileName = this.autoSelections[itemId];
+    const profile = this.getProfileByName(profileName);
+    const item = this.data.find(i => i.id === itemId);
+    const itemName = item ? item.ten : 'Item';
+    
     try {
-      const result = await ipcRenderer.invoke('auto-stop-for-item', itemId);
-      const item = this.data.find(i => i.id === itemId);
-      const itemName = item ? item.ten : 'Item';
-      
-      if (result?.success) {
-        // Đảm bảo trạng thái được cập nhật
-        this.itemAutoRunning[itemId] = false;
-        this.renderTable();
-        this.showMessage(`Đã dừng auto cho "${itemName}".`, 'success');
+      // Dừng theo loại profile
+      if (profile && profile.type === 'snap') {
+        const result = await ipcRenderer.invoke('snap-stop-for-item', itemId);
+        if (result?.success) {
+          this.itemAutoRunning[itemId] = false;
+          this.renderTable();
+          this.showMessage(`Đã dừng snap click cho "${itemName}".`, 'success');
+        } else {
+          this.itemAutoRunning[itemId] = false;
+          this.renderTable();
+          this.showMessage(result?.error || 'Không dừng được snap click.', 'error');
+        }
       } else {
-        // Nếu có lỗi, vẫn giữ trạng thái dừng trong UI
-        this.itemAutoRunning[itemId] = false;
-        this.renderTable();
-        this.showMessage(result?.error || 'Không dừng được auto click.', 'error');
+        const result = await ipcRenderer.invoke('auto-stop-for-item', itemId);
+        if (result?.success) {
+          this.itemAutoRunning[itemId] = false;
+          this.renderTable();
+          this.showMessage(`Đã dừng auto cho "${itemName}".`, 'success');
+        } else {
+          this.itemAutoRunning[itemId] = false;
+          this.renderTable();
+          this.showMessage(result?.error || 'Không dừng được auto click.', 'error');
+        }
       }
     } catch (error) {
-      // Nếu có lỗi, vẫn cập nhật UI
       this.itemAutoRunning[itemId] = false;
       this.renderTable();
-      this.showMessage('Lỗi khi dừng auto: ' + error.message, 'error');
+      this.showMessage('Lỗi khi dừng: ' + error.message, 'error');
     }
   }
 
   getProfileByName(name) {
     if (!name) return null;
-    return this.autoProfiles.find((profile) => profile.name === name) || null;
+    
+    // Nếu name có format "type:name", parse nó
+    if (name.includes(':')) {
+      const [type, profileName] = name.split(':');
+      if (type === 'auto') {
+        return { ...this.autoProfiles.find((p) => p.name === profileName), type: 'auto' } || null;
+      } else if (type === 'snap') {
+        return { ...this.snapProfiles.find((p) => p.name === profileName), type: 'snap' } || null;
+      }
+    }
+    
+    // Tìm trong auto profiles trước (backward compatibility)
+    const autoProfile = this.autoProfiles.find((profile) => profile.name === name);
+    if (autoProfile) {
+      return { ...autoProfile, type: 'auto' };
+    }
+    
+    // Tìm trong snap profiles
+    const snapProfile = this.snapProfiles.find((profile) => profile.name === name);
+    if (snapProfile) {
+      return { ...snapProfile, type: 'snap' };
+    }
+    
+    return null;
   }
 
   applyProfile(profile, options = {}) {
@@ -1478,8 +1598,19 @@ class App {
 
     if (!pickWindowBtn) return;
 
-    // Load snap config khi khởi động
+    // Load snap config và profiles khi khởi động
     this.loadSnapConfig();
+    this.loadSnapProfiles();
+
+    // Lưu kịch bản
+    if (this.snapElements.saveProfileBtn) {
+      this.snapElements.saveProfileBtn.addEventListener('click', () => this.saveSnapProfile());
+    }
+
+    // Load kịch bản
+    if (this.snapElements.loadProfileBtn) {
+      this.snapElements.loadProfileBtn.addEventListener('click', () => this.showLoadSnapProfileDialog());
+    }
 
     // Chọn ứng dụng bằng drag
     pickWindowBtn.addEventListener('dragstart', (event) => {
@@ -1518,6 +1649,21 @@ class App {
       }
       if (payload?.message) {
         this.showMessage(payload.message, payload.type || (payload.running ? 'success' : 'error'));
+      }
+    });
+
+    // Lắng nghe status snap click cho từng item
+    ipcRenderer.on('snap-click-status-for-item', (_event, payload) => {
+      if (payload?.itemId !== undefined) {
+        if (typeof payload?.running === 'boolean') {
+          this.itemAutoRunning[payload.itemId] = payload.running || false;
+          this.renderTable();
+        }
+        if (payload?.message) {
+          const item = this.data.find(i => i.id === payload.itemId);
+          const itemName = item ? item.ten : 'Item';
+          this.showMessage(`[${itemName}] ${payload.message}`, payload.type || (payload.running ? 'success' : 'error'));
+        }
       }
     });
 
@@ -1639,12 +1785,18 @@ class App {
       return;
     }
 
-    list.innerHTML = this.snapState.points.map((point, index) => `
+    list.innerHTML = this.snapState.points.map((point, index) => {
+      const hasTemplate = point.templateImagePath ? '✓' : '✗';
+      return `
       <li class="flex items-center justify-between bg-indigo-50 text-indigo-700 px-2 py-1 rounded">
-        <span>#${index + 1} • X: ${point.offsetX} | Y: ${point.offsetY}</span>
-        <button class="text-red-500 text-xs font-bold" onclick="app.removeSnapPoint(${index})">✖</button>
+        <span>#${index + 1} • X: ${point.offsetX} | Y: ${point.offsetY} • Template: ${hasTemplate}</span>
+        <div class="flex gap-1">
+          <button class="text-blue-500 text-xs font-bold" onclick="app.editSnapPoint(${index})" title="Sửa">✏️</button>
+          <button class="text-red-500 text-xs font-bold" onclick="app.removeSnapPoint(${index})" title="Xóa">✖</button>
+        </div>
       </li>
-    `).join('');
+    `;
+    }).join('');
   }
 
   async removeSnapPoint(index) {
@@ -1662,10 +1814,182 @@ class App {
     }
   }
 
+  async editSnapPoint(index) {
+    try {
+      const result = await ipcRenderer.invoke('snap-get-point', index);
+      if (!result?.success || !result.point) {
+        this.showMessage(result?.error || 'Không thể lấy thông tin điểm.', 'error');
+        return;
+      }
+
+      const point = result.point;
+      
+      // Gửi thông tin edit
+      ipcRenderer.send('snap-selector-edit', {
+        point: point,
+        index: index
+      });
+      
+      // Kiểm tra xem có ảnh gốc không
+      if (point.imagePath) {
+        // Mở selector với ảnh gốc
+        this.showMessage('Đang mở cửa sổ chỉnh sửa với ảnh gốc...', 'success');
+        const openResult = await ipcRenderer.invoke('snap-open-selector-with-image', point.imagePath);
+        if (!openResult?.success) {
+          // Nếu không mở được ảnh gốc, chụp lại
+          if (!this.snapState.targetWindow) {
+            this.showMessage('Vui lòng chọn ứng dụng trước khi chỉnh sửa.', 'error');
+            return;
+          }
+          this.showMessage('Không tìm thấy ảnh gốc, đang chụp lại...', 'info');
+          await this.captureSnapWindow();
+        }
+      } else {
+        // Không có ảnh gốc, cần chụp lại
+        if (!this.snapState.targetWindow) {
+          this.showMessage('Vui lòng chọn ứng dụng trước khi chỉnh sửa.', 'error');
+          return;
+        }
+        this.showMessage('Đang mở cửa sổ chỉnh sửa...', 'success');
+        await this.captureSnapWindow();
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
   clearSnapPoints() {
     this.snapState.points = [];
     this.renderSnapPoints();
     this.showMessage('Đã xóa tất cả điểm', 'success');
+  }
+
+  async loadSnapProfiles() {
+    try {
+      const result = await ipcRenderer.invoke('snap-load-profiles');
+      if (result?.success && Array.isArray(result.profiles)) {
+        this.snapProfiles = result.profiles;
+        this.renderSnapProfiles();
+      }
+    } catch (error) {
+      console.warn('Không thể tải danh sách kịch bản snap:', error);
+    }
+  }
+
+  renderSnapProfiles() {
+    const list = this.snapElements.profilesList;
+    if (!list) return;
+
+    if (this.snapProfiles.length === 0) {
+      list.innerHTML = '<li class="text-gray-400">Chưa có kịch bản nào</li>';
+      return;
+    }
+
+    list.innerHTML = this.snapProfiles.map((profile, index) => {
+      const escapedName = profile.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      return `
+      <li class="flex items-center justify-between bg-indigo-50 text-indigo-700 px-2 py-1 rounded">
+        <span class="flex-1">${profile.name} (${profile.points?.length || 0} điểm)</span>
+        <div class="flex gap-1">
+          <button class="text-blue-500 text-xs font-bold" onclick="app.loadSnapProfile('${escapedName}')" title="Load">📂</button>
+          <button class="text-red-500 text-xs font-bold" onclick="app.deleteSnapProfile('${escapedName}')" title="Xóa">✖</button>
+        </div>
+      </li>
+    `;
+    }).join('');
+  }
+
+  async saveSnapProfile() {
+    const nameInput = this.snapElements.profileNameInput;
+    if (!nameInput) return;
+
+    const name = nameInput.value.trim();
+    if (!name) {
+      this.showMessage('Vui lòng nhập tên kịch bản.', 'error');
+      return;
+    }
+
+    if (this.snapState.points.length === 0) {
+      this.showMessage('Chưa có điểm nào để lưu.', 'error');
+      return;
+    }
+
+    try {
+      const interval = Math.max(500, parseInt(this.snapElements.intervalInput.value, 10) || 2000);
+      const result = await ipcRenderer.invoke('snap-save-profile', {
+        name,
+        interval
+      });
+
+      if (result?.success) {
+        this.snapProfiles = Array.isArray(result.profiles) ? result.profiles : [];
+        this.renderSnapProfiles();
+        this.showMessage(`Đã lưu kịch bản "${name}".`, 'success');
+        nameInput.value = '';
+      } else {
+        this.showMessage(result?.error || 'Không lưu được kịch bản.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  async loadSnapProfile(profileName) {
+    try {
+      const result = await ipcRenderer.invoke('snap-load-profile', profileName);
+      if (result?.success) {
+        // Load points
+        this.snapState.points = result.profile.points || [];
+        this.renderSnapPoints();
+
+        // Load interval
+        if (result.profile.interval && this.snapElements.intervalInput) {
+          this.snapElements.intervalInput.value = result.profile.interval;
+        }
+
+        // Load target window nếu có
+        if (result.profile.targetWindow) {
+          this.snapState.targetWindow = result.profile.targetWindow;
+          this.updateSnapTargetInfo();
+        }
+
+        this.showMessage(`Đã load kịch bản "${profileName}".`, 'success');
+      } else {
+        this.showMessage(result?.error || 'Không thể load kịch bản.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  async deleteSnapProfile(profileName) {
+    if (!confirm(`Bạn có chắc muốn xóa kịch bản "${profileName}"?`)) {
+      return;
+    }
+
+    try {
+      const result = await ipcRenderer.invoke('snap-delete-profile', profileName);
+      if (result?.success) {
+        this.snapProfiles = Array.isArray(result.profiles) ? result.profiles : [];
+        this.renderSnapProfiles();
+        this.showMessage(`Đã xóa kịch bản "${profileName}".`, 'success');
+      } else {
+        this.showMessage(result?.error || 'Không thể xóa kịch bản.', 'error');
+      }
+    } catch (error) {
+      this.showMessage('Lỗi: ' + error.message, 'error');
+    }
+  }
+
+  showLoadSnapProfileDialog() {
+    // Hiển thị dialog để chọn profile (có thể dùng select hoặc modal)
+    if (this.snapProfiles.length === 0) {
+      this.showMessage('Chưa có kịch bản nào để load.', 'error');
+      return;
+    }
+
+    // Đơn giản: hiển thị danh sách, user click vào để load
+    this.showMessage('Click vào kịch bản trong danh sách để load.', 'info');
   }
 
   async startSnapClick() {

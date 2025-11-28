@@ -31,7 +31,7 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false
     },
-    icon: path.join(__dirname, 'assets/icons/icon.ico'),
+    icon: path.join(__dirname, 'assets', 'icons', 'icon.jpg'),
     title: 'VPT TOOLS'
   });
 

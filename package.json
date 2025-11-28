@@ -29,7 +29,10 @@
     "productName": "VPT TOOLS",
     "win": {
       "target": "nsis",
-      "icon": "assets/icons/icon"
+      "icon": "assets/icons/icon.jpg"
     }
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
   }
 }

@@ -1,7 +1,8 @@
-const { spawn, exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const ScriptHelper = require('./helpers/ScriptHelper');
+const { spawn, exec } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+const { app } = require("electron");
+const ScriptHelper = require("./helpers/ScriptHelper");
 
 class AutoClickController {
   constructor(ipcMain, mainWindow, appDir) {
@@ -12,45 +13,57 @@ class AutoClickController {
     this.autoClickScriptPath = null;
     this.autoClickTarget = null;
     this.autoClickProcesses = {}; // Lưu auto process cho từng item: { itemId: { process, scriptPath, targetWindow } }
-    this.autoConfigPath = path.join(this.appDir, 'auto-config.json');
+    // Lưu config vào userData thay vì appDir (writable khi build)
+    const userDataPath = app.getPath("userData");
+    this.autoConfigPath = path.join(userDataPath, "auto-config.json");
     this.autoClickConfig = this.loadAutoClickConfig();
-    this.autoProfilesPath = path.join(this.appDir, 'auto-profiles.json');
+    this.autoProfilesPath = path.join(userDataPath, "auto-profiles.json");
     this.autoProfiles = this.loadAutoProfilesFromDisk();
     this.setupIPC(ipcMain);
   }
 
   setupIPC(ipcMain) {
-    ipcMain.handle('auto-load-config', () => this.autoClickConfig);
-    ipcMain.handle('auto-save-config', (event, partialConfig) => this.saveAutoClickConfig(partialConfig || {}));
-    ipcMain.handle('auto-list-profiles', () => this.autoProfiles);
-    ipcMain.handle('auto-save-profile', (event, profile) => this.saveAutoProfile(profile || {}));
-    ipcMain.handle('auto-delete-profile', (event, profileName) => this.deleteAutoProfile(profileName));
-    ipcMain.handle('auto-target-by-title', async (event, title) => this.detectAutoWindowByTitle(title));
-    ipcMain.handle('auto-target-by-pid', async (event, pid) => this.detectAutoWindowByPid(pid));
-    ipcMain.handle('auto-detect-window', async (event, coords) => {
+    ipcMain.handle("auto-load-config", () => this.autoClickConfig);
+    ipcMain.handle("auto-save-config", (event, partialConfig) =>
+      this.saveAutoClickConfig(partialConfig || {})
+    );
+    ipcMain.handle("auto-list-profiles", () => this.autoProfiles);
+    ipcMain.handle("auto-save-profile", (event, profile) =>
+      this.saveAutoProfile(profile || {})
+    );
+    ipcMain.handle("auto-delete-profile", (event, profileName) =>
+      this.deleteAutoProfile(profileName)
+    );
+    ipcMain.handle("auto-target-by-title", async (event, title) =>
+      this.detectAutoWindowByTitle(title)
+    );
+    ipcMain.handle("auto-target-by-pid", async (event, pid) =>
+      this.detectAutoWindowByPid(pid)
+    );
+    ipcMain.handle("auto-detect-window", async (event, coords) => {
       return await this.detectAutoClickWindow(coords);
     });
-    ipcMain.handle('auto-compute-point', async (event, coords) => {
+    ipcMain.handle("auto-compute-point", async (event, coords) => {
       return await this.computeAutoClickPoint(coords);
     });
-    ipcMain.handle('auto-start', async (event, config) => {
+    ipcMain.handle("auto-start", async (event, config) => {
       return await this.startAutoClick(config);
     });
-    ipcMain.handle('auto-start-for-item', async (event, itemId, config) => {
+    ipcMain.handle("auto-start-for-item", async (event, itemId, config) => {
       return await this.startAutoClickForItem(itemId, config);
     });
-    ipcMain.handle('auto-stop-for-item', async (event, itemId) => {
+    ipcMain.handle("auto-stop-for-item", async (event, itemId) => {
       return await this.stopAutoClickForItem(itemId);
     });
-    ipcMain.handle('auto-stop', async () => {
+    ipcMain.handle("auto-stop", async () => {
       return await this.stopAutoClick();
     });
   }
 
   async detectAutoClickWindow(coords = {}) {
     const { x, y } = coords;
-    if (typeof x !== 'number' || typeof y !== 'number') {
-      return { success: false, error: 'Tọa độ không hợp lệ.' };
+    if (typeof x !== "number" || typeof y !== "number") {
+      return { success: false, error: "Tọa độ không hợp lệ." };
     }
 
     const pointX = Math.round(x);
@@ -106,54 +119,66 @@ $result = [PSCustomObject]@{
 }
 $result | ConvertTo-Json -Compress`;
 
-    const scriptPath = this.scriptHelper.writeTempScript('detectWindow', scriptContent);
+    const scriptPath = this.scriptHelper.writeTempScript(
+      "detectWindow",
+      scriptContent
+    );
 
     return await new Promise((resolve) => {
-      exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, (error, stdout, stderr) => {
-        this.scriptHelper.cleanupTempScript(scriptPath);
+      exec(
+        `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`,
+        (error, stdout, stderr) => {
+          this.scriptHelper.cleanupTempScript(scriptPath);
 
-        if (error) {
-          console.error('Lỗi khi xác định ứng dụng:', stderr || error.message);
-          resolve({ success: false, error: 'Không xác định được ứng dụng.' });
-          return;
+          if (error) {
+            console.error(
+              "Lỗi khi xác định ứng dụng:",
+              stderr || error.message
+            );
+            resolve({ success: false, error: "Không xác định được ứng dụng." });
+            return;
+          }
+
+          const output = stdout ? stdout.toString().trim() : "";
+          if (!output || output === "NOTFOUND") {
+            resolve({
+              success: false,
+              error: "Không tìm thấy cửa sổ ở vị trí đã thả.",
+            });
+            return;
+          }
+
+          let parsed;
+          try {
+            parsed = JSON.parse(output);
+          } catch (e) {
+            console.error("Không parse được JSON trả về:", output);
+            resolve({ success: false, error: "Dữ liệu trả về không hợp lệ." });
+            return;
+          }
+
+          this.autoClickTarget = {
+            pid: parsed.pid,
+            title: parsed.title,
+            handle: Number(parsed.handle) || parsed.handle,
+          };
+
+          resolve({
+            success: true,
+            window: this.autoClickTarget,
+          });
         }
-
-        const output = stdout ? stdout.toString().trim() : '';
-        if (!output || output === 'NOTFOUND') {
-          resolve({ success: false, error: 'Không tìm thấy cửa sổ ở vị trí đã thả.' });
-          return;
-        }
-
-        let parsed;
-        try {
-          parsed = JSON.parse(output);
-        } catch (e) {
-          console.error('Không parse được JSON trả về:', output);
-          resolve({ success: false, error: 'Dữ liệu trả về không hợp lệ.' });
-          return;
-        }
-
-        this.autoClickTarget = {
-          pid: parsed.pid,
-          title: parsed.title,
-          handle: Number(parsed.handle) || parsed.handle
-        };
-
-        resolve({
-          success: true,
-          window: this.autoClickTarget
-        });
-      });
+      );
     });
   }
 
   async detectAutoWindowByTitle(title) {
-    const keyword = (title || '').trim();
+    const keyword = (title || "").trim();
     if (!keyword) {
-      return { success: false, error: 'Thiếu tên định danh để tìm ứng dụng.' };
+      return { success: false, error: "Thiếu tên định danh để tìm ứng dụng." };
     }
 
-    const escapedTitle = keyword.replace(/"/g, '`"').replace(/\$/g, '`$');
+    const escapedTitle = keyword.replace(/"/g, '`"').replace(/\$/g, "`$");
 
     const scriptContent = `Add-Type @"
 using System;
@@ -194,48 +219,63 @@ $foundWindow = $null
 }, 0) | Out-Null
 if ($foundWindow) { $foundWindow | ConvertTo-Json -Compress } else { Write-Output "NOTFOUND" }`;
 
-    const scriptPath = this.scriptHelper.writeTempScript('autoFindByTitle', scriptContent);
+    const scriptPath = this.scriptHelper.writeTempScript(
+      "autoFindByTitle",
+      scriptContent
+    );
 
     return await new Promise((resolve) => {
-      exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, (error, stdout, stderr) => {
-        this.scriptHelper.cleanupTempScript(scriptPath);
+      exec(
+        `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`,
+        (error, stdout, stderr) => {
+          this.scriptHelper.cleanupTempScript(scriptPath);
 
-        if (error) {
-          console.error('Lỗi khi tìm ứng dụng theo tên:', stderr || error.message);
-          resolve({ success: false, error: 'Không tìm được ứng dụng theo tên.' });
-          return;
+          if (error) {
+            console.error(
+              "Lỗi khi tìm ứng dụng theo tên:",
+              stderr || error.message
+            );
+            resolve({
+              success: false,
+              error: "Không tìm được ứng dụng theo tên.",
+            });
+            return;
+          }
+
+          const output = stdout ? stdout.toString().trim() : "";
+          if (!output || output === "NOTFOUND") {
+            resolve({
+              success: false,
+              error: "Không tìm thấy cửa sổ trùng tên.",
+            });
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(output);
+            this.autoClickTarget = {
+              pid: parsed.pid,
+              title: parsed.title,
+              handle: Number(parsed.handle) || parsed.handle,
+            };
+
+            resolve({
+              success: true,
+              window: this.autoClickTarget,
+            });
+          } catch (err) {
+            console.error("Không parse được kết quả tìm cửa sổ:", output);
+            resolve({ success: false, error: "Dữ liệu trả về không hợp lệ." });
+          }
         }
-
-        const output = stdout ? stdout.toString().trim() : '';
-        if (!output || output === 'NOTFOUND') {
-          resolve({ success: false, error: 'Không tìm thấy cửa sổ trùng tên.' });
-          return;
-        }
-
-        try {
-          const parsed = JSON.parse(output);
-          this.autoClickTarget = {
-            pid: parsed.pid,
-            title: parsed.title,
-            handle: Number(parsed.handle) || parsed.handle
-          };
-
-          resolve({
-            success: true,
-            window: this.autoClickTarget
-          });
-        } catch (err) {
-          console.error('Không parse được kết quả tìm cửa sổ:', output);
-          resolve({ success: false, error: 'Dữ liệu trả về không hợp lệ.' });
-        }
-      });
+      );
     });
   }
 
   async detectAutoWindowByPid(pid) {
     const processId = Number(pid);
     if (!processId || !Number.isInteger(processId) || processId <= 0) {
-      return { success: false, error: 'PID không hợp lệ.' };
+      return { success: false, error: "PID không hợp lệ." };
     }
 
     const scriptContent = `Add-Type @"
@@ -278,48 +318,70 @@ $foundWindow = $null
 }, 0) | Out-Null
 if ($foundWindow) { $foundWindow | ConvertTo-Json -Compress } else { Write-Output "NOTFOUND" }`;
 
-    const scriptPath = this.scriptHelper.writeTempScript('autoFindByPid', scriptContent);
+    const scriptPath = this.scriptHelper.writeTempScript(
+      "autoFindByPid",
+      scriptContent
+    );
 
     return await new Promise((resolve) => {
-      exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, (error, stdout, stderr) => {
-        this.scriptHelper.cleanupTempScript(scriptPath);
+      exec(
+        `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`,
+        (error, stdout, stderr) => {
+          this.scriptHelper.cleanupTempScript(scriptPath);
 
-        if (error) {
-          console.error('Lỗi khi tìm ứng dụng theo PID:', stderr || error.message);
-          resolve({ success: false, error: 'Không tìm được ứng dụng theo PID.' });
-          return;
+          if (error) {
+            console.error(
+              "Lỗi khi tìm ứng dụng theo PID:",
+              stderr || error.message
+            );
+            resolve({
+              success: false,
+              error: "Không tìm được ứng dụng theo PID.",
+            });
+            return;
+          }
+
+          const output = stdout ? stdout.toString().trim() : "";
+          if (!output || output === "NOTFOUND") {
+            resolve({
+              success: false,
+              error: "Không tìm thấy cửa sổ với PID này.",
+            });
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(output);
+            this.autoClickTarget = {
+              pid: parsed.pid,
+              title: parsed.title,
+              handle: Number(parsed.handle) || parsed.handle,
+            };
+
+            resolve({
+              success: true,
+              window: this.autoClickTarget,
+            });
+          } catch (err) {
+            console.error(
+              "Không parse được kết quả tìm cửa sổ theo PID:",
+              output
+            );
+            resolve({ success: false, error: "Dữ liệu trả về không hợp lệ." });
+          }
         }
-
-        const output = stdout ? stdout.toString().trim() : '';
-        if (!output || output === 'NOTFOUND') {
-          resolve({ success: false, error: 'Không tìm thấy cửa sổ với PID này.' });
-          return;
-        }
-
-        try {
-          const parsed = JSON.parse(output);
-          this.autoClickTarget = {
-            pid: parsed.pid,
-            title: parsed.title,
-            handle: Number(parsed.handle) || parsed.handle
-          };
-
-          resolve({
-            success: true,
-            window: this.autoClickTarget
-          });
-        } catch (err) {
-          console.error('Không parse được kết quả tìm cửa sổ theo PID:', output);
-          resolve({ success: false, error: 'Dữ liệu trả về không hợp lệ.' });
-        }
-      });
+      );
     });
   }
 
   async computeAutoClickPoint(coords = {}) {
     const { x, y } = coords;
-    if (!this.autoClickTarget || typeof x !== 'number' || typeof y !== 'number') {
-      return { success: false, error: 'Thiếu thông tin ứng dụng hoặc tọa độ.' };
+    if (
+      !this.autoClickTarget ||
+      typeof x !== "number" ||
+      typeof y !== "number"
+    ) {
+      return { success: false, error: "Thiếu thông tin ứng dụng hoặc tọa độ." };
     }
 
     const screenX = Math.round(x);
@@ -360,54 +422,69 @@ $point = [PSCustomObject]@{
 }
 $point | ConvertTo-Json -Compress`;
 
-    const scriptPath = this.scriptHelper.writeTempScript('resolvePoint', scriptContent);
+    const scriptPath = this.scriptHelper.writeTempScript(
+      "resolvePoint",
+      scriptContent
+    );
 
     return await new Promise((resolve) => {
-      exec(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, (error, stdout, stderr) => {
-        this.scriptHelper.cleanupTempScript(scriptPath);
+      exec(
+        `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`,
+        (error, stdout, stderr) => {
+          this.scriptHelper.cleanupTempScript(scriptPath);
 
-        if (error) {
-          console.error('Lỗi khi tính điểm auto:', stderr || error.message);
-          resolve({ success: false, error: 'Không xác định được điểm auto.' });
-          return;
-        }
+          if (error) {
+            console.error("Lỗi khi tính điểm auto:", stderr || error.message);
+            resolve({
+              success: false,
+              error: "Không xác định được điểm auto.",
+            });
+            return;
+          }
 
-        const output = stdout ? stdout.toString().trim() : '';
-        if (!output || output === 'NOTFOUND') {
-          resolve({ success: false, error: 'Không lấy được kích thước cửa sổ.' });
-          return;
-        }
+          const output = stdout ? stdout.toString().trim() : "";
+          if (!output || output === "NOTFOUND") {
+            resolve({
+              success: false,
+              error: "Không lấy được kích thước cửa sổ.",
+            });
+            return;
+          }
 
-        if (output === 'OUTSIDE') {
-          resolve({ success: false, error: 'Điểm thả nằm ngoài cửa sổ.' });
-          return;
-        }
+          if (output === "OUTSIDE") {
+            resolve({ success: false, error: "Điểm thả nằm ngoài cửa sổ." });
+            return;
+          }
 
-        try {
-          const point = JSON.parse(output);
-          resolve({ success: true, point });
-        } catch (e) {
-          console.error('Không parse được JSON điểm auto:', output);
-          resolve({ success: false, error: 'Dữ liệu điểm không hợp lệ.' });
+          try {
+            const point = JSON.parse(output);
+            resolve({ success: true, point });
+          } catch (e) {
+            console.error("Không parse được JSON điểm auto:", output);
+            resolve({ success: false, error: "Dữ liệu điểm không hợp lệ." });
+          }
         }
-      });
+      );
     });
   }
 
   async startAutoClick(config = {}) {
     if (!this.autoClickTarget || !this.autoClickTarget.handle) {
-      return { success: false, error: 'Vui lòng chọn ứng dụng trước khi chạy auto.' };
+      return {
+        success: false,
+        error: "Vui lòng chọn ứng dụng trước khi chạy auto.",
+      };
     }
 
     const points = Array.isArray(config.points) ? config.points : [];
     if (points.length === 0) {
-      return { success: false, error: 'Chưa có điểm auto nào.' };
+      return { success: false, error: "Chưa có điểm auto nào." };
     }
 
     const sanitizedPoints = this.normalizeAutoPoints(points);
 
     if (sanitizedPoints.length === 0) {
-      return { success: false, error: 'Điểm auto không hợp lệ.' };
+      return { success: false, error: "Điểm auto không hợp lệ." };
     }
 
     const interval = Math.max(200, Number(config.interval) || 1000);
@@ -417,50 +494,62 @@ $point | ConvertTo-Json -Compress`;
 
     const pointsJson = JSON.stringify(sanitizedPoints)
       .replace(/"/g, '`"')
-      .replace(/\$/g, '`$');
-    const scriptContent = this.buildAutoClickScript(this.autoClickTarget.handle, interval, pointsJson);
-    const scriptPath = this.scriptHelper.writeTempScript('autoClickRunner', scriptContent);
+      .replace(/\$/g, "`$");
+    const scriptContent = this.buildAutoClickScript(
+      this.autoClickTarget.handle,
+      interval,
+      pointsJson
+    );
+    const scriptPath = this.scriptHelper.writeTempScript(
+      "autoClickRunner",
+      scriptContent
+    );
     this.autoClickScriptPath = scriptPath;
     this.saveAutoClickConfig({
       points: sanitizedPoints,
-      interval
+      interval,
     });
 
     return await new Promise((resolve) => {
-      this.autoClickProcess = spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
-        cwd: this.appDir,
-        windowsHide: true
-      });
+      this.autoClickProcess = spawn(
+        "powershell",
+        ["-ExecutionPolicy", "Bypass", "-File", scriptPath],
+        {
+          cwd: this.appDir,
+          windowsHide: true,
+        }
+      );
 
-      this.autoClickProcess.stdout.on('data', (data) => {
+      this.autoClickProcess.stdout.on("data", (data) => {
         const message = data.toString().trim();
         if (!message) return;
 
-        if (message === 'TARGET_LOST') {
+        if (message === "TARGET_LOST") {
           this.autoClickTarget = null;
           if (this.mainWindow) {
-            this.mainWindow.webContents.send('auto-click-status', {
+            this.mainWindow.webContents.send("auto-click-status", {
               running: false,
-              message: 'Cửa sổ mục tiêu đã đóng hoặc không còn hợp lệ.',
-              type: 'error',
-              targetLost: true
+              message: "Cửa sổ mục tiêu đã đóng hoặc không còn hợp lệ.",
+              type: "error",
+              targetLost: true,
             });
           }
           this.stopAutoClick({ silent: true });
         }
       });
 
-      this.autoClickProcess.stderr.on('data', (data) => {
-        console.error('Auto click stderr:', data.toString());
+      this.autoClickProcess.stderr.on("data", (data) => {
+        console.error("Auto click stderr:", data.toString());
       });
 
-      this.autoClickProcess.on('exit', (code) => {
+      this.autoClickProcess.on("exit", (code) => {
         this.cleanupAutoClickProcess();
         if (this.mainWindow) {
-          this.mainWindow.webContents.send('auto-click-status', {
+          this.mainWindow.webContents.send("auto-click-status", {
             running: false,
-            message: code === 0 ? 'Auto click đã dừng.' : 'Auto click dừng đột ngột.',
-            type: code === 0 ? 'success' : 'error'
+            message:
+              code === 0 ? "Auto click đã dừng." : "Auto click dừng đột ngột.",
+            type: code === 0 ? "success" : "error",
           });
         }
       });
@@ -540,17 +629,17 @@ while ($true) {
       try {
         this.autoClickProcess.kill();
       } catch (error) {
-        console.error('Không thể dừng auto click:', error);
+        console.error("Không thể dừng auto click:", error);
       }
     }
 
     this.cleanupAutoClickProcess();
 
     if (!silent && this.mainWindow) {
-      this.mainWindow.webContents.send('auto-click-status', {
+      this.mainWindow.webContents.send("auto-click-status", {
         running: false,
-        message: 'Auto click đã dừng.',
-        type: 'success'
+        message: "Auto click đã dừng.",
+        type: "success",
       });
     }
 
@@ -559,17 +648,17 @@ while ($true) {
 
   async startAutoClickForItem(itemId, config = {}) {
     if (!config.targetWindow || !config.targetWindow.handle) {
-      return { success: false, error: 'Thiếu thông tin cửa sổ đích.' };
+      return { success: false, error: "Thiếu thông tin cửa sổ đích." };
     }
 
     const points = Array.isArray(config.points) ? config.points : [];
     if (points.length === 0) {
-      return { success: false, error: 'Chưa có điểm auto nào.' };
+      return { success: false, error: "Chưa có điểm auto nào." };
     }
 
     const sanitizedPoints = this.normalizeAutoPoints(points);
     if (sanitizedPoints.length === 0) {
-      return { success: false, error: 'Điểm auto không hợp lệ.' };
+      return { success: false, error: "Điểm auto không hợp lệ." };
     }
 
     const interval = Math.max(200, Number(config.interval) || 1000);
@@ -579,53 +668,65 @@ while ($true) {
 
     const pointsJson = JSON.stringify(sanitizedPoints)
       .replace(/"/g, '`"')
-      .replace(/\$/g, '`$');
-    const scriptContent = this.buildAutoClickScript(config.targetWindow.handle, interval, pointsJson);
-    const scriptPath = this.scriptHelper.writeTempScript(`autoClickRunner-${itemId}`, scriptContent);
+      .replace(/\$/g, "`$");
+    const scriptContent = this.buildAutoClickScript(
+      config.targetWindow.handle,
+      interval,
+      pointsJson
+    );
+    const scriptPath = this.scriptHelper.writeTempScript(
+      `autoClickRunner-${itemId}`,
+      scriptContent
+    );
 
     return await new Promise((resolve) => {
-      const process = spawn('powershell', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
-        cwd: this.appDir,
-        windowsHide: true
-      });
+      const process = spawn(
+        "powershell",
+        ["-ExecutionPolicy", "Bypass", "-File", scriptPath],
+        {
+          cwd: this.appDir,
+          windowsHide: true,
+        }
+      );
 
       // Lưu thông tin process cho item này
       this.autoClickProcesses[itemId] = {
         process,
         scriptPath,
-        targetWindow: config.targetWindow
+        targetWindow: config.targetWindow,
       };
 
-      process.stdout.on('data', (data) => {
+      process.stdout.on("data", (data) => {
         const message = data.toString().trim();
         if (!message) return;
 
-        if (message === 'TARGET_LOST') {
+        if (message === "TARGET_LOST") {
           if (this.mainWindow) {
-            this.mainWindow.webContents.send('auto-click-status-for-item', {
+            this.mainWindow.webContents.send("auto-click-status-for-item", {
               itemId,
               running: false,
-              message: 'Cửa sổ mục tiêu đã đóng hoặc không còn hợp lệ.',
-              type: 'error',
-              targetLost: true
+              message: "Cửa sổ mục tiêu đã đóng hoặc không còn hợp lệ.",
+              type: "error",
+              targetLost: true,
             });
           }
           this.stopAutoClickForItem(itemId, { silent: true });
         }
       });
 
-      process.stderr.on('data', (data) => {
+      process.stderr.on("data", (data) => {
         console.error(`Auto click stderr cho item ${itemId}:`, data.toString());
       });
 
-      process.on('exit', (code) => {
+      process.on("exit", (code) => {
         this.cleanupAutoClickProcessForItem(itemId);
         if (this.mainWindow) {
-          this.mainWindow.webContents.send('auto-click-status-for-item', {
+          this.mainWindow.webContents.send("auto-click-status-for-item", {
             itemId,
             running: false,
-            message: code === 0 ? 'Auto click đã dừng.' : 'Auto click dừng đột ngột.',
-            type: code === 0 ? 'success' : 'error'
+            message:
+              code === 0 ? "Auto click đã dừng." : "Auto click dừng đột ngột.",
+            type: code === 0 ? "success" : "error",
           });
         }
       });
@@ -637,20 +738,20 @@ while ($true) {
   async stopAutoClickForItem(itemId, options = {}) {
     const silent = options && options.silent;
     const itemProcess = this.autoClickProcesses[itemId];
-    
+
     if (!itemProcess) {
       // Nếu không có process, vẫn trả về success để cập nhật UI
       if (!silent && this.mainWindow) {
-        this.mainWindow.webContents.send('auto-click-status-for-item', {
+        this.mainWindow.webContents.send("auto-click-status-for-item", {
           itemId,
           running: false,
-          message: 'Auto click đã dừng.',
-          type: 'success'
+          message: "Auto click đã dừng.",
+          type: "success",
         });
       }
       return { success: true };
     }
-    
+
     if (itemProcess.process) {
       try {
         itemProcess.process.kill();
@@ -663,11 +764,11 @@ while ($true) {
     this.cleanupAutoClickProcessForItem(itemId);
 
     if (!silent && this.mainWindow) {
-      this.mainWindow.webContents.send('auto-click-status-for-item', {
+      this.mainWindow.webContents.send("auto-click-status-for-item", {
         itemId,
         running: false,
-        message: 'Auto click đã dừng.',
-        type: 'success'
+        message: "Auto click đã dừng.",
+        type: "success",
       });
     }
 
@@ -700,7 +801,7 @@ while ($true) {
   loadAutoProfilesFromDisk() {
     try {
       if (fs.existsSync(this.autoProfilesPath)) {
-        const raw = fs.readFileSync(this.autoProfilesPath, 'utf8');
+        const raw = fs.readFileSync(this.autoProfilesPath, "utf8");
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           return parsed
@@ -709,13 +810,13 @@ while ($true) {
         }
       }
     } catch (error) {
-      console.warn('Không thể đọc danh sách quy trình auto:', error.message);
+      console.warn("Không thể đọc danh sách quy trình auto:", error.message);
     }
     return [];
   }
 
   normalizeAutoProfile(profile) {
-    if (!profile || typeof profile.name !== 'string') {
+    if (!profile || typeof profile.name !== "string") {
       return null;
     }
     const name = profile.name.trim();
@@ -729,26 +830,30 @@ while ($true) {
     return {
       name,
       interval: Math.max(200, Number(profile.interval) || 1200),
-      points
+      points,
     };
   }
 
   persistAutoProfiles() {
     try {
-      fs.writeFileSync(this.autoProfilesPath, JSON.stringify(this.autoProfiles, null, 2), 'utf8');
+      fs.writeFileSync(
+        this.autoProfilesPath,
+        JSON.stringify(this.autoProfiles, null, 2),
+        "utf8"
+      );
     } catch (error) {
-      console.error('Không thể lưu danh sách quy trình auto:', error.message);
+      console.error("Không thể lưu danh sách quy trình auto:", error.message);
     }
   }
 
   saveAutoProfile(payload = {}) {
-    const name = (payload.name || '').trim();
+    const name = (payload.name || "").trim();
     if (!name) {
-      return { success: false, error: 'Tên quy trình không hợp lệ.' };
+      return { success: false, error: "Tên quy trình không hợp lệ." };
     }
     const points = this.normalizeAutoPoints(payload.points || []);
     if (!points.length) {
-      return { success: false, error: 'Quy trình cần ít nhất một điểm auto.' };
+      return { success: false, error: "Quy trình cần ít nhất một điểm auto." };
     }
     const interval = Math.max(200, Number(payload.interval) || 1000);
     const profile = { name, interval, points };
@@ -769,16 +874,17 @@ while ($true) {
 
   deleteAutoProfile(profileName) {
     if (!profileName) {
-      return { success: false, error: 'Thiếu tên quy trình.' };
+      return { success: false, error: "Thiếu tên quy trình." };
     }
 
     const before = this.autoProfiles.length;
     this.autoProfiles = this.autoProfiles.filter(
-      (profile) => profile.name.toLowerCase() !== String(profileName).toLowerCase()
+      (profile) =>
+        profile.name.toLowerCase() !== String(profileName).toLowerCase()
     );
 
     if (this.autoProfiles.length === before) {
-      return { success: false, error: 'Không tìm thấy quy trình cần xóa.' };
+      return { success: false, error: "Không tìm thấy quy trình cần xóa." };
     }
 
     this.persistAutoProfiles();
@@ -788,19 +894,21 @@ while ($true) {
   loadAutoClickConfig() {
     try {
       if (fs.existsSync(this.autoConfigPath)) {
-        const raw = fs.readFileSync(this.autoConfigPath, 'utf8');
+        const raw = fs.readFileSync(this.autoConfigPath, "utf8");
         const parsed = JSON.parse(raw);
         return {
           interval: Number(parsed.interval) || 1200,
-          points: Array.isArray(parsed.points) ? this.normalizeAutoPoints(parsed.points) : []
+          points: Array.isArray(parsed.points)
+            ? this.normalizeAutoPoints(parsed.points)
+            : [],
         };
       }
     } catch (error) {
-      console.warn('Không thể đọc cấu hình auto click:', error.message);
+      console.warn("Không thể đọc cấu hình auto click:", error.message);
     }
     return {
       interval: 1200,
-      points: []
+      points: [],
     };
   }
 
@@ -808,15 +916,18 @@ while ($true) {
     return points
       .map((point) => ({
         offsetX: Number(point.offsetX),
-        offsetY: Number(point.offsetY)
+        offsetY: Number(point.offsetY),
       }))
-      .filter((point) => Number.isFinite(point.offsetX) && Number.isFinite(point.offsetY));
+      .filter(
+        (point) =>
+          Number.isFinite(point.offsetX) && Number.isFinite(point.offsetY)
+      );
   }
 
   saveAutoClickConfig(partial = {}) {
     const nextConfig = {
       ...this.autoClickConfig,
-      ...partial
+      ...partial,
     };
 
     if (partial.interval !== undefined) {
@@ -834,9 +945,13 @@ while ($true) {
     this.autoClickConfig = nextConfig;
 
     try {
-      fs.writeFileSync(this.autoConfigPath, JSON.stringify(this.autoClickConfig, null, 2), 'utf8');
+      fs.writeFileSync(
+        this.autoConfigPath,
+        JSON.stringify(this.autoClickConfig, null, 2),
+        "utf8"
+      );
     } catch (error) {
-      console.error('Không thể lưu cấu hình auto click:', error.message);
+      console.error("Không thể lưu cấu hình auto click:", error.message);
     }
 
     return this.autoClickConfig;
@@ -844,4 +959,3 @@ while ($true) {
 }
 
 module.exports = AutoClickController;
-
